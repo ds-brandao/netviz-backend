@@ -1,0 +1,10 @@
+services:
+  frr-router1:
+    build: ./frr-router
+    container_name: frr-router
+    hostname: frr-router
+    privileged: true
+    ports:
+      - "7777:22"
+    volumes:
+      - ./ssh-keys/authorized_keys:/home/frruser/.ssh/authorized_keys:rw
