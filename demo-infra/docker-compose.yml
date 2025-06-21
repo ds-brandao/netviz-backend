@@ -7,4 +7,4 @@ services:
     ports:
       - "7777:22"
     volumes:
-      - ./ssh-keys/authorized_keys:/home/frruser/.ssh/authorized_keys:rw
+      - ./test-ssh-keys/authorized_keys:/home/frruser/.ssh/authorized_keys:rw
