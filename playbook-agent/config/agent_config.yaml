@@ -1,0 +1,50 @@
+agent:
+  max_iterations: 5
+  timeout_seconds: 300
+  log_level: "INFO"
+  
+llm:
+  model: "Llama-4-Maverick-17B-128E-Instruct-FP8"
+  temperature: 0.5
+  max_tokens: 100000
+  api_timeout: 60
+
+device:
+  connection_timeout: 120
+  command_timeout: 120
+  config_backup_enabled: true
+  
+playbook:
+  validation_enabled: true
+  lint_enabled: true
+  temp_dir: "/tmp/playbook-agent"
+  
+github:
+  repository: "playbooks"
+  branch: "main"
+  commit_message_template: "Generated playbook for {device_id} - iteration {iteration}"
+
+mcp_server:
+  host: "0.0.0.0"
+  port: 8080
+  timeout: 300
+  
+api:
+  host: "0.0.0.0"
+  port: 8000
+  reload: true
+  workers: 1
+
+devices:
+  router-01:
+    host: "192.168.1.1"
+    username: "admin"
+    password: "password123"
+  switch-core-01:
+    host: "10.0.1.100"
+    username: "netadmin"
+    private_key_path: "/home/user/.ssh/network_key"
+  firewall-01:
+    host: "172.16.1.1"
+    username: "secadmin"
+    password: "secure123"
