@@ -2,6 +2,16 @@
 
 A self-healing network system that uses AI and Ansible to detect, roll back, and adjust network configurations.
 
+## Todo
+
+- [ ] Network data structure visualization in the UI
+- [ ] Device configuration retrieval via Ansible playbooks
+- [ ] Version control system for device configurations
+  - [ ] Tagging mechanism for stable configurations
+  - [ ] Configuration history tracking
+- [ ] Automated rollback functionality for failed changes
+
+
 ## Stack
 - Python
 - FastAPI
