@@ -2,8 +2,8 @@
 set -e
 
 # Fix SSH key permissions
-chown ovsuser:ovsuser /home/ovsuser/.ssh/authorized_keys
-chmod 600 /home/ovsuser/.ssh/authorized_keys
+chown clientuser:clientuser /home/clientuser/.ssh/authorized_keys
+chmod 600 /home/clientuser/.ssh/authorized_keys
 
 # Configure firewall rules for network isolation
 echo "Configuring network isolation..."
@@ -16,26 +16,21 @@ iptables -A OUTPUT -o eth0 -d 172.20.0.0/24 -j DROP
 iptables -I OUTPUT -o eth0 -d 172.20.0.1 -j ACCEPT
 iptables -I INPUT -i eth0 -s 172.20.0.1 -j ACCEPT
 
-# Enable IP forwarding
-echo "Enabling IP forwarding..."
-echo 1 > /proc/sys/net/ipv4/ip_forward
-
 # Start SSH
 echo "Starting SSH..."
 service ssh start
 
 # Configure routing
 echo "Configuring routing..."
-# Remove default route via management network
-ip route del default via 172.20.0.1 2>/dev/null || true
-# Add route back to client network via router
-ip route add 192.168.10.0/24 via 192.168.20.1 || true
-
-# Note: We're not using OVS bridging anymore, just simple Layer 3 routing
-# The switch acts as a router between the router-switch network and server network
+# Add default route via router
+ip route add default via 192.168.10.1 || true
+# Add specific routes for server networks via router
+ip route add 192.168.30.0/24 via 192.168.10.1 || true
+ip route add 192.168.20.0/24 via 192.168.10.1 || true
 
 echo "Services started successfully"
 echo "SSH: $(service ssh status | grep Active || echo 'Status unknown')"
+echo "Client ready"
 
 # Show configuration
 echo "Interface configuration:"

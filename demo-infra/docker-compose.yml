@@ -6,11 +6,21 @@ networks:
     ipam:
       config:
         - subnet: 172.20.0.0/24
-  prodnet:
+  client-net:
     driver: bridge
     ipam:
       config:
-        - subnet: 192.168.100.0/24
+        - subnet: 192.168.10.0/24
+  router-switch-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.20.0/24
+  server-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.30.0/24
 
 services:
   frr-router1:
@@ -23,10 +33,12 @@ services:
     volumes:
       - ./test-ssh-keys/authorized_keys:/home/frruser/.ssh/authorized_keys:rw
     networks:
+      client-net:
+        ipv4_address: 192.168.10.2
       management:
         ipv4_address: 172.20.0.10
-      prodnet:
-        ipv4_address: 192.168.100.10
+      router-switch-net:
+        ipv4_address: 192.168.20.2
 
   ovs-switch1:
     build: ./ovs-switch
@@ -40,5 +52,37 @@ services:
     networks:
       management:
         ipv4_address: 172.20.0.11
-      prodnet:
-        ipv4_address: 192.168.100.11
+      router-switch-net:
+        ipv4_address: 192.168.20.3   # ← was 192.168.20.2, now changed to avoid conflict
+      server-net:
+        ipv4_address: 192.168.30.2
+
+  client1:
+    build: ./client
+    container_name: client
+    hostname: client
+    privileged: true
+    ports:
+      - "7779:22"
+    volumes:
+      - ./test-ssh-keys/authorized_keys:/home/clientuser/.ssh/authorized_keys:rw
+    networks:
+      management:
+        ipv4_address: 172.20.0.5
+      client-net:
+        ipv4_address: 192.168.10.10
+
+  server1:
+    build: ./server
+    container_name: server
+    hostname: server
+    privileged: true
+    ports:
+      - "7780:22"
+    volumes:
+      - ./test-ssh-keys/authorized_keys:/home/serveruser/.ssh/authorized_keys:rw
+    networks:
+      management:
+        ipv4_address: 172.20.0.20
+      server-net:
+        ipv4_address: 192.168.30.10
