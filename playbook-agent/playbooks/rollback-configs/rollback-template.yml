@@ -15,7 +15,7 @@
   
   vars:
     # ==========================================================================
-    # TEMPLATE VARIABLES - TO BE FILLED BY AI AGENT
+    # TEMPLATE VARIABLES 
     # ==========================================================================
     rollback_timestamp: "{{ ansible_date_time.epoch }}"
     backup_source: "{{ rollback_config_source | default('/tmp/network_backups') }}"
