@@ -3,13 +3,29 @@ set -e
 
 # Copy SSH keys from mounted volume to both root and frruser
 if [ -d /root/.ssh ]; then
+    echo "SSH keys directory found at /root/.ssh"
+    ls -la /root/.ssh/
+    
     # Copy authorized_keys to frruser home
     if [ -f /root/.ssh/authorized_keys ]; then
+        echo "Copying authorized_keys to frruser"
         cp /root/.ssh/authorized_keys /home/frruser/.ssh/
         chown frruser:frruser /home/frruser/.ssh/authorized_keys
         chmod 600 /home/frruser/.ssh/authorized_keys
+        
+        # Copy to a writable location for root and link it
+        echo "Setting up authorized_keys for root"
+        mkdir -p /tmp/.ssh
+        cp /root/.ssh/authorized_keys /tmp/.ssh/
+        chmod 600 /tmp/.ssh/authorized_keys
+        
+        # Update SSH config to look in /tmp/.ssh for root
+        echo "AuthorizedKeysFile /tmp/.ssh/authorized_keys" >> /etc/ssh/sshd_config
+    else
+        echo "No authorized_keys file found in /root/.ssh/"
     fi
-    # Note: /root/.ssh is mounted read-only, so we can't change permissions there
+else
+    echo "No SSH keys directory found at /root/.ssh"
 fi
 
 # Find network interfaces
