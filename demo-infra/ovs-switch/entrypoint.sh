@@ -19,14 +19,10 @@ if [ -d /root/.ssh ]; then
         chown ovsuser:ovsuser /home/ovsuser/.ssh/authorized_keys
         chmod 600 /home/ovsuser/.ssh/authorized_keys
         
-        # Copy to a writable location for root and link it
+        # Ensure root's .ssh directory has proper permissions
         echo "Setting up authorized_keys for root"
-        mkdir -p /tmp/.ssh
-        cp /root/.ssh/authorized_keys /tmp/.ssh/
-        chmod 600 /tmp/.ssh/authorized_keys
-        
-        # Update SSH config to look in /tmp/.ssh for root
-        echo "AuthorizedKeysFile /tmp/.ssh/authorized_keys" >> /etc/ssh/sshd_config
+        chmod 700 /root/.ssh
+        chmod 600 /root/.ssh/authorized_keys
     else
         echo "No authorized_keys file found in /root/.ssh/"
     fi
