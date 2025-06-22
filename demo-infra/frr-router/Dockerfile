@@ -19,6 +19,8 @@ RUN apt update && \
     net-tools \
     tcpdump \
     vim \
+    iptables \
+    traceroute \
     && mkdir /var/run/sshd
 
 # Add FRR GPG key and repository
