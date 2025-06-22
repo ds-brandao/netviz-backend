@@ -1,0 +1,102 @@
+networks:
+  management:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.25.0.0/24
+  client-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.10.0/24
+  server-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.30.0/24
+
+services:
+  switch1:
+    build: ./ovs-switch
+    container_name: switch1
+    hostname: switch1
+    privileged: true
+    ports:
+      - "7771:22"
+    volumes:
+      - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/switch1:/var/log/switch1
+    networks:
+      management:
+        ipv4_address: 172.25.0.11
+      client-net:
+
+  frr-router:
+    build: ./frr-router
+    container_name: frr-router
+    hostname: frr-router
+    privileged: true
+    depends_on:
+      - switch1
+      - switch2
+    ports:
+      - "7777:22"
+    volumes:
+      - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/frr-router:/var/log/frr-router
+    networks:
+      management:
+        ipv4_address: 172.25.0.10
+      client-net:
+        ipv4_address: 192.168.10.254
+      server-net:
+        ipv4_address: 192.168.30.254
+
+  switch2:
+    build: ./ovs-switch
+    container_name: switch2
+    hostname: switch2
+    privileged: true
+    ports:
+      - "7778:22"
+    volumes:
+      - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/switch2:/var/log/switch2
+    networks:
+      management:
+        ipv4_address: 172.25.0.12
+      server-net:
+
+  client:
+    build: ./client
+    container_name: client
+    hostname: client
+    privileged: true
+    depends_on:
+      - switch1
+    volumes:
+      - ./logs/client:/var/log/client
+    networks:
+      management:
+        ipv4_address: 172.25.0.5
+      client-net:
+        ipv4_address: 192.168.10.10
+
+  server:
+    build: ./server
+    container_name: server
+    hostname: server
+    privileged: true
+    depends_on:
+      - switch2
+    ports:
+      - "7780:22"
+      - "8080:8080"
+    volumes:
+      - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/server:/var/log/server
+    networks:
+      management:
+        ipv4_address: 172.25.0.20
+      server-net:
+        ipv4_address: 192.168.30.10
