@@ -1,0 +1,174 @@
+================================================================================
+NETWORK DEVICE CONFIGURATION SUMMARY
+================================================================================
+Generated: {{ config_data.metadata.collection_timestamp }}
+Hostname: {{ config_data.metadata.hostname }}
+Device Type: {{ config_data.metadata.device_type | upper }}
+================================================================================
+
+SYSTEM INFORMATION
+================================================================================
+Operating System: {{ config_data.metadata.ansible_facts.distribution }} {{ config_data.metadata.ansible_facts.distribution_version }}
+Architecture: {{ config_data.metadata.ansible_facts.architecture }}
+OS Family: {{ config_data.metadata.ansible_facts.os_family }}
+
+Network Interfaces:
+{% for interface in config_data.metadata.ansible_facts.interfaces %}
+  - {{ interface }}
+{% endfor %}
+
+SERVICES STATUS
+================================================================================
+{% if config_data.services.frr.enabled %}
+FRRouting (FRR): ACTIVE
+  Version: {{ config_data.services.frr.version | default('Unknown') }}
+  Daemons: {{ config_data.services.frr.daemons | default('Unknown') }}
+{% else %}
+FRRouting (FRR): INACTIVE
+{% endif %}
+
+{% if config_data.services.ovs.enabled %}
+Open vSwitch (OVS): ACTIVE
+  Version: {{ config_data.services.ovs.version | default('Unknown') }}
+{% else %}
+Open vSwitch (OVS): INACTIVE
+{% endif %}
+
+{% if config_data.services.frr.enabled %}
+FRR CONFIGURATION SUMMARY
+================================================================================
+{% if config_data.configurations.frr.running_config %}
+Running Configuration Status: Available ({{ config_data.configurations.frr.running_config | length }} bytes)
+
+{% if 'bgpd' in config_data.services.frr.daemons %}
+BGP STATUS:
+{{ config_data.configurations.frr.bgp_summary | default('No BGP information available') }}
+{% endif %}
+
+{% if 'ospfd' in config_data.services.frr.daemons %}
+OSPF STATUS:
+{{ config_data.configurations.frr.ospf_neighbors | default('No OSPF neighbors found') }}
+{% endif %}
+
+ROUTING TABLE SUMMARY:
+{{ config_data.configurations.frr.routing_table | default('No routing information available') | truncate(500) }}
+
+{% else %}
+Running Configuration Status: Not Available
+{% endif %}
+{% endif %}
+
+{% if config_data.services.ovs.enabled %}
+OPEN VSWITCH CONFIGURATION SUMMARY
+================================================================================
+{% if config_data.configurations.ovs.database_config %}
+Database Configuration:
+{{ config_data.configurations.ovs.database_config }}
+
+Bridge Configuration Summary:
+{% set bridges = config_data.configurations.ovs.database_config | regex_findall('Bridge\\s+"?([^"\\s]+)"?') %}
+{% if bridges %}
+{% for bridge in bridges %}
+  - Bridge: {{ bridge }}
+{% endfor %}
+{% else %}
+  - No bridges configured
+{% endif %}
+
+{% if config_data.configurations.ovs.flow_tables %}
+Flow Table Summary:
+{% for flow_result in config_data.configurations.ovs.flow_tables %}
+  Bridge: {{ flow_result.item | default('unknown') }}
+  Flows: {{ flow_result.stdout_lines | length if flow_result.stdout_lines else 0 }} entries
+{% endfor %}
+{% endif %}
+
+{% else %}
+Database Configuration: Not Available
+{% endif %}
+{% endif %}
+
+SYSTEM NETWORK CONFIGURATION
+================================================================================
+Network Interfaces:
+{{ config_data.configurations.system.interfaces | default('No interface information available') | truncate(1000) }}
+
+Routing Table:
+{{ config_data.configurations.system.routes | default('No routing information available') | truncate(500) }}
+
+ARP Table:
+{{ config_data.configurations.system.arp_table | default('No ARP information available') | truncate(500) }}
+
+{% if config_data.configurations.system.iptables %}
+Firewall Rules (Summary):
+{{ config_data.configurations.system.iptables | regex_findall('Chain\\s+[^\\n]+') | join('\n') }}
+{% endif %}
+
+Interface Statistics:
+{{ config_data.configurations.system.interface_stats | default('No statistics available') | truncate(800) }}
+
+{% if config_data.configurations.system.network_files %}
+NETWORK CONFIGURATION FILES
+================================================================================
+{% for net_file in config_data.configurations.system.network_files %}
+{% if net_file.item and net_file.item.path %}
+File: {{ net_file.item.path }}
+Size: {{ net_file.content | b64decode | length if net_file.content else 0 }} bytes
+{% endif %}
+{% endfor %}
+{% endif %}
+
+CONFIGURATION BACKUP DETAILS
+================================================================================
+Backup Components:
+{% if config_data.services.frr.enabled %}
+  ✓ FRRouting configuration and state
+{% endif %}
+{% if config_data.services.ovs.enabled %}
+  ✓ Open vSwitch database and flows
+{% endif %}
+  ✓ System network interfaces
+  ✓ Routing and ARP tables
+  ✓ Firewall configuration
+  ✓ Network configuration files
+
+Data Integrity:
+  - Configuration files: {{ 'Present' if config_data.configurations.frr.config_file else 'Missing' }}
+  - Service states: {{ 'Captured' if config_data.services else 'Missing' }}
+  - System state: {{ 'Complete' if config_data.configurations.system else 'Incomplete' }}
+
+OPERATIONAL NOTES
+================================================================================
+{% if config_data.services.frr.enabled and config_data.services.ovs.enabled %}
+This device functions as a SWITCH with both routing and switching capabilities.
+Both FRRouting and Open vSwitch are active and configured.
+{% elif config_data.services.frr.enabled %}
+This device functions as a ROUTER with FRRouting providing routing services.
+Open vSwitch is not active on this device.
+{% elif config_data.services.ovs.enabled %}
+This device functions as a SWITCH with Open vSwitch providing switching services.
+FRRouting is not active on this device.
+{% else %}
+This device appears to be a SERVER with basic network services only.
+Neither FRRouting nor Open vSwitch are active.
+{% endif %}
+
+Recommended Actions:
+{% if not config_data.services.frr.enabled and not config_data.services.ovs.enabled %}
+  - Verify intended device role and service configuration
+  - Consider enabling appropriate network services if needed
+{% endif %}
+{% if config_data.services.frr.enabled and not config_data.configurations.frr.running_config %}
+  - Investigate FRRouting configuration retrieval issues
+  - Verify FRR service status and permissions
+{% endif %}
+{% if config_data.services.ovs.enabled and not config_data.configurations.ovs.database_config %}
+  - Investigate Open vSwitch configuration retrieval issues
+  - Verify OVS service status and database accessibility
+{% endif %}
+
+================================================================================
+END OF CONFIGURATION SUMMARY
+Generated by NetViz Backend Ansible Automation
+{{ config_data.metadata.collection_timestamp }}
+================================================================================ 

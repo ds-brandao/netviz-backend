@@ -1,0 +1,415 @@
+---
+# =============================================================================
+# ANSIBLE PLAYBOOK TEMPLATE: NETWORK CONFIGURATION RETRIEVAL
+# =============================================================================
+# Purpose: Retrieve and backup network device configurations
+# Target: Ubuntu containers running FRRouting and Open vSwitch
+# Last Updated: {{ ansible_date_time.iso8601 }}
+# =============================================================================
+
+- name: "Retrieve Network Device Configurations"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: true
+  become: true
+  serial: "{{ batch_size | default(1) }}"
+  
+  vars:
+    # ==========================================================================
+    # TEMPLATE VARIABLES - TO BE FILLED BY AI AGENT
+    # ==========================================================================
+    backup_timestamp: "{{ ansible_date_time.epoch }}"
+    backup_directory: "/tmp/network_backups/{{ backup_timestamp }}"
+    config_types:
+      - "frr_config"      # FRRouting configuration
+      - "ovs_config"      # Open vSwitch configuration
+      - "interface_config" # Network interface configuration
+      - "system_config"   # System network configuration
+    
+    # Device-specific configuration paths
+    frr_config_path: "/etc/frr/frr.conf"
+    frr_running_config_cmd: "vtysh -c 'show running-config'"
+    ovs_db_path: "/etc/openvswitch/conf.db"
+    
+    # Output format and storage
+    output_format: "{{ config_output_format | default('json') }}"  # json, yaml, text
+    store_locally: "{{ store_configs_locally | default(true) }}"
+    remote_storage: "{{ remote_config_storage | default('') }}"
+    
+    # Error handling
+    continue_on_error: "{{ ignore_retrieval_errors | default(false) }}"
+    max_retries: "{{ config_retrieval_retries | default(3) }}"
+    retry_delay: "{{ config_retrieval_delay | default(10) }}"
+
+  pre_tasks:
+    - name: "Validate target hosts are reachable"
+      ansible.builtin.ping:
+      register: connectivity_check
+      failed_when: false
+      tags: [validation, connectivity]
+
+    - name: "Create local backup directory"
+      ansible.builtin.file:
+        path: "{{ backup_directory }}"
+        state: directory
+        mode: '0755'
+      delegate_to: localhost
+      run_once: true
+      when: store_locally | bool
+      tags: [backup, setup]
+
+    - name: "Gather network device facts"
+      ansible.builtin.setup:
+        gather_subset:
+          - network
+          - hardware
+      tags: [facts, discovery]
+
+  tasks:
+    # ==========================================================================
+    # DEVICE TYPE DETECTION AND CLASSIFICATION
+    # ==========================================================================
+    - name: "Detect device type and running services"
+      block:
+        - name: "Check if FRRouting is installed and running"
+          ansible.builtin.systemd:
+            name: frr
+          register: frr_service_status
+          failed_when: false
+
+        - name: "Check if Open vSwitch is installed and running"
+          ansible.builtin.systemd:
+            name: openvswitch-switch
+          register: ovs_service_status
+          failed_when: false
+
+        - name: "Classify device type based on running services"
+          ansible.builtin.set_fact:
+            device_type: >-
+              {%- if frr_service_status.status is defined and frr_service_status.status.ActiveState == "active" -%}
+                {%- if ovs_service_status.status is defined and ovs_service_status.status.ActiveState == "active" -%}
+                  switch
+                {%- else -%}
+                  router
+                {%- endif -%}
+              {%- elif ovs_service_status.status is defined and ovs_service_status.status.ActiveState == "active" -%}
+                switch
+              {%- else -%}
+                server
+              {%- endif -%}
+            has_frr: >-
+              {{ (frr_service_status.status is defined and 
+                  frr_service_status.status.ActiveState == "active") | bool }}
+            has_ovs: >-
+              {{ (ovs_service_status.status is defined and 
+                  ovs_service_status.status.ActiveState == "active") | bool }}
+
+        - name: "Display detected device configuration"
+          ansible.builtin.debug:
+            msg:
+              - "Device Type: {{ device_type }}"
+              - "FRRouting Active: {{ has_frr }}"
+              - "Open vSwitch Active: {{ has_ovs }}"
+              - "Hostname: {{ inventory_hostname }}"
+      tags: [detection, classification]
+
+    # ==========================================================================
+    # FRR CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve FRRouting configuration"
+      block:
+        - name: "Get FRR running configuration"
+          ansible.builtin.shell: |
+            {{ frr_running_config_cmd }}
+          register: frr_running_config
+          changed_when: false
+          failed_when: frr_running_config.rc != 0
+
+        - name: "Get FRR daemon status"
+          ansible.builtin.shell: |
+            vtysh -c 'show daemons'
+          register: frr_daemon_status
+          changed_when: false
+          failed_when: false
+
+        - name: "Get FRR version information"
+          ansible.builtin.shell: |
+            vtysh -c 'show version'
+          register: frr_version_info
+          changed_when: false
+          failed_when: false
+
+        - name: "Get BGP configuration (if BGP is enabled)"
+          ansible.builtin.shell: |
+            vtysh -c 'show ip bgp summary'
+          register: frr_bgp_summary
+          changed_when: false
+          failed_when: false
+          when: "'bgpd' in frr_daemon_status.stdout"
+
+        - name: "Get OSPF configuration (if OSPF is enabled)"
+          ansible.builtin.shell: |
+            vtysh -c 'show ip ospf neighbor'
+          register: frr_ospf_neighbors
+          changed_when: false
+          failed_when: false
+          when: "'ospfd' in frr_daemon_status.stdout"
+
+        - name: "Get routing table"
+          ansible.builtin.shell: |
+            vtysh -c 'show ip route'
+          register: frr_routing_table
+          changed_when: false
+          failed_when: false
+
+        - name: "Backup FRR configuration file"
+          ansible.builtin.slurp:
+            src: "{{ frr_config_path }}"
+          register: frr_config_file
+          failed_when: false
+
+      when: has_frr | bool
+      tags: [frr, routing, configuration]
+
+    # ==========================================================================
+    # OPEN VSWITCH CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve Open vSwitch configuration"
+      block:
+        - name: "Get OVS database configuration"
+          ansible.builtin.shell: |
+            ovs-vsctl show
+          register: ovs_database_config
+          changed_when: false
+          failed_when: false
+
+        - name: "Get OVS bridge configuration"
+          ansible.builtin.shell: |
+            ovs-vsctl list bridge
+          register: ovs_bridge_config
+          changed_when: false
+          failed_when: false
+
+        - name: "Get OVS port configuration"
+          ansible.builtin.shell: |
+            ovs-vsctl list port
+          register: ovs_port_config
+          changed_when: false
+          failed_when: false
+
+        - name: "Get OVS interface configuration"
+          ansible.builtin.shell: |
+            ovs-vsctl list interface
+          register: ovs_interface_config
+          changed_when: false
+          failed_when: false
+
+        - name: "Get OVS flow tables"
+          ansible.builtin.shell: |
+            ovs-ofctl dump-flows {{ item }}
+          register: ovs_flow_tables
+          changed_when: false
+          failed_when: false
+          loop: "{{ ovs_bridge_list | default([]) }}"
+          vars:
+            ovs_bridge_list: >-
+              {{ ovs_database_config.stdout_lines | 
+                 select('match', '^\\s*Bridge\\s+') | 
+                 map('regex_replace', '^\\s*Bridge\\s+"?([^"\\s]+)"?.*', '\\1') | 
+                 list }}
+
+        - name: "Get OVS version information"
+          ansible.builtin.shell: |
+            ovs-vsctl --version
+          register: ovs_version_info
+          changed_when: false
+          failed_when: false
+
+      when: has_ovs | bool
+      tags: [ovs, switching, configuration]
+
+    # ==========================================================================
+    # SYSTEM NETWORK CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve system network configuration"
+      block:
+        - name: "Get network interface configuration"
+          ansible.builtin.shell: |
+            ip addr show
+          register: system_interfaces
+          changed_when: false
+
+        - name: "Get routing table"
+          ansible.builtin.shell: |
+            ip route show
+          register: system_routes
+          changed_when: false
+
+        - name: "Get ARP table"
+          ansible.builtin.shell: |
+            ip neighbor show
+          register: system_arp_table
+          changed_when: false
+
+        - name: "Get firewall rules (iptables)"
+          ansible.builtin.shell: |
+            iptables -L -n -v
+          register: system_iptables
+          changed_when: false
+          failed_when: false
+
+        - name: "Get network interface statistics"
+          ansible.builtin.shell: |
+            cat /proc/net/dev
+          register: system_interface_stats
+          changed_when: false
+
+        - name: "Get system network configuration files"
+          ansible.builtin.find:
+            paths:
+              - "/etc/network/interfaces.d"
+              - "/etc/netplan"
+              - "/etc/systemd/network"
+            patterns:
+              - "*.cfg"
+              - "*.yaml"
+              - "*.yml"
+              - "interfaces*"
+          register: system_network_files
+
+        - name: "Read network configuration files"
+          ansible.builtin.slurp:
+            src: "{{ item.path }}"
+          register: system_network_configs
+          loop: "{{ system_network_files.files }}"
+          failed_when: false
+
+      tags: [system, network, interfaces]
+
+    # ==========================================================================
+    # CONFIGURATION ASSEMBLY AND FORMATTING
+    # ==========================================================================
+    - name: "Assemble device configuration data"
+      ansible.builtin.set_fact:
+        device_config_data:
+          metadata:
+            hostname: "{{ inventory_hostname }}"
+            device_type: "{{ device_type }}"
+            collection_timestamp: "{{ ansible_date_time.iso8601 }}"
+            ansible_facts:
+              os_family: "{{ ansible_os_family }}"
+              distribution: "{{ ansible_distribution }}"
+              distribution_version: "{{ ansible_distribution_version }}"
+              architecture: "{{ ansible_architecture }}"
+              interfaces: "{{ ansible_interfaces }}"
+          services:
+            frr:
+              enabled: "{{ has_frr }}"
+              version: "{{ frr_version_info.stdout | default('N/A') }}"
+              daemons: "{{ frr_daemon_status.stdout | default('N/A') }}"
+            ovs:
+              enabled: "{{ has_ovs }}"
+              version: "{{ ovs_version_info.stdout | default('N/A') }}"
+          configurations:
+            frr:
+              running_config: "{{ frr_running_config.stdout | default('') }}"
+              config_file: "{{ frr_config_file.content | default('') | b64decode }}"
+              bgp_summary: "{{ frr_bgp_summary.stdout | default('') }}"
+              ospf_neighbors: "{{ frr_ospf_neighbors.stdout | default('') }}"
+              routing_table: "{{ frr_routing_table.stdout | default('') }}"
+            ovs:
+              database_config: "{{ ovs_database_config.stdout | default('') }}"
+              bridge_config: "{{ ovs_bridge_config.stdout | default('') }}"
+              port_config: "{{ ovs_port_config.stdout | default('') }}"
+              interface_config: "{{ ovs_interface_config.stdout | default('') }}"
+              flow_tables: "{{ ovs_flow_tables.results | default([]) }}"
+            system:
+              interfaces: "{{ system_interfaces.stdout | default('') }}"
+              routes: "{{ system_routes.stdout | default('') }}"
+              arp_table: "{{ system_arp_table.stdout | default('') }}"
+              iptables: "{{ system_iptables.stdout | default('') }}"
+              interface_stats: "{{ system_interface_stats.stdout | default('') }}"
+              network_files: "{{ system_network_configs.results | default([]) }}"
+      tags: [assembly, formatting]
+
+    # ==========================================================================
+    # CONFIGURATION STORAGE AND BACKUP
+    # ==========================================================================
+    - name: "Store configuration data locally"
+      block:
+        - name: "Save configuration as JSON"
+          ansible.builtin.copy:
+            content: "{{ device_config_data | to_nice_json }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}_config.json"
+            mode: '0644'
+          delegate_to: localhost
+          when: output_format == 'json'
+
+        - name: "Save configuration as YAML"
+          ansible.builtin.copy:
+            content: "{{ device_config_data | to_nice_yaml }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}_config.yml"
+            mode: '0644'
+          delegate_to: localhost
+          when: output_format == 'yaml'
+
+        - name: "Create human-readable configuration summary"
+          ansible.builtin.template:
+            src: "config_summary.j2"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}_summary.txt"
+            mode: '0644'
+          delegate_to: localhost
+          vars:
+            config_data: "{{ device_config_data }}"
+
+      when: store_locally | bool
+      tags: [storage, backup]
+
+  post_tasks:
+    - name: "Generate retrieval summary report"
+      ansible.builtin.debug:
+        msg:
+          - "Configuration retrieval completed for {{ inventory_hostname }}"
+          - "Device Type: {{ device_type }}"
+          - "Services: FRR={{ has_frr }}, OVS={{ has_ovs }}"
+          - "Backup Location: {{ backup_directory }}/{{ inventory_hostname }}_*"
+      tags: [summary, reporting]
+
+    - name: "Log retrieval operation"
+      ansible.builtin.lineinfile:
+        path: "{{ backup_directory }}/retrieval.log"
+        line: "{{ ansible_date_time.iso8601 }} - {{ inventory_hostname }} - {{ device_type }} - SUCCESS"
+        create: true
+        mode: '0644'
+      delegate_to: localhost
+      tags: [logging]
+
+  handlers:
+    - name: "Cleanup temporary files"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: absent
+      loop:
+        - "/tmp/frr_temp_config"
+        - "/tmp/ovs_temp_config"
+      listen: "cleanup temp files"
+
+    - name: "Send notification on completion"
+      ansible.builtin.debug:
+        msg: "Configuration retrieval completed for {{ ansible_play_hosts | length }} hosts"
+      run_once: true
+      listen: "notify completion"
+
+# =============================================================================
+# ERROR HANDLING AND RECOVERY
+# =============================================================================
+- name: "Handle retrieval failures"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: false
+  tasks:
+    - name: "Report failed retrievals"
+      ansible.builtin.debug:
+        msg: "Configuration retrieval failed for {{ inventory_hostname }}"
+      when: 
+        - connectivity_check is defined
+        - connectivity_check.failed | default(false)
+      tags: [error_handling]

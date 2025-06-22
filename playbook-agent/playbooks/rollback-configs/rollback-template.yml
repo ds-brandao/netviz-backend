@@ -1,0 +1,508 @@
+---
+# =============================================================================
+# ANSIBLE PLAYBOOK TEMPLATE: NETWORK CONFIGURATION ROLLBACK
+# =============================================================================
+# Purpose: Rollback network device configurations to a previous state
+# Target: Ubuntu containers running FRRouting and Open vSwitch
+# Last Updated: {{ ansible_date_time.iso8601 }}
+# =============================================================================
+
+- name: "Rollback Network Device Configurations"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: true
+  become: true
+  serial: "{{ rollback_batch_size | default(1) }}"
+  
+  vars:
+    # ==========================================================================
+    # TEMPLATE VARIABLES - TO BE FILLED BY AI AGENT
+    # ==========================================================================
+    rollback_timestamp: "{{ ansible_date_time.epoch }}"
+    backup_source: "{{ rollback_config_source | default('/tmp/network_backups') }}"
+    target_backup_timestamp: "{{ rollback_target_timestamp | mandatory }}"
+    
+    # Rollback configuration options
+    rollback_types:
+      - "frr_config"      # FRRouting configuration
+      - "ovs_config"      # Open vSwitch configuration
+      - "interface_config" # Network interface configuration
+    
+    # Safety and validation options
+    create_pre_rollback_backup: "{{ backup_before_rollback | default(true) }}"
+    validate_before_apply: "{{ validate_rollback_config | default(true) }}"
+    dry_run_mode: "{{ rollback_dry_run | default(false) }}"
+    
+    # Service management
+    restart_services: "{{ restart_services_after_rollback | default(true) }}"
+    service_restart_delay: "{{ rollback_service_delay | default(10) }}"
+    
+    # Error handling and recovery
+    rollback_timeout: "{{ config_rollback_timeout | default(300) }}"
+    max_rollback_retries: "{{ rollback_retries | default(2) }}"
+    enable_rollback_verification: "{{ verify_rollback_success | default(true) }}"
+    auto_recovery_on_failure: "{{ enable_auto_recovery | default(true) }}"
+
+  pre_tasks:
+    - name: "Validate rollback prerequisites"
+      block:
+        - name: "Check connectivity to target hosts"
+          ansible.builtin.ping:
+          register: connectivity_check
+
+        - name: "Verify backup source exists"
+          ansible.builtin.stat:
+            path: "{{ backup_source }}/{{ target_backup_timestamp }}"
+          register: backup_source_check
+          delegate_to: localhost
+          failed_when: not backup_source_check.stat.exists
+
+        - name: "Validate backup files for target host"
+          ansible.builtin.find:
+            paths: "{{ backup_source }}/{{ target_backup_timestamp }}"
+            patterns: "{{ inventory_hostname }}_config.*"
+          register: host_backup_files
+          delegate_to: localhost
+          failed_when: host_backup_files.matched == 0
+
+        - name: "Load target configuration data"
+          ansible.builtin.slurp:
+            src: "{{ host_backup_files.files[0].path }}"
+          register: target_config_raw
+          delegate_to: localhost
+
+        - name: "Parse target configuration"
+          ansible.builtin.set_fact:
+            target_config: >-
+              {%- if host_backup_files.files[0].path.endswith('.json') -%}
+                {{ target_config_raw.content | b64decode | from_json }}
+              {%- elif host_backup_files.files[0].path.endswith('.yml') or host_backup_files.files[0].path.endswith('.yaml') -%}
+                {{ target_config_raw.content | b64decode | from_yaml }}
+              {%- else -%}
+                {}
+              {%- endif -%}
+
+      tags: [validation, prerequisites]
+
+    - name: "Create pre-rollback backup"
+      block:
+        - name: "Create backup directory for pre-rollback state"
+          ansible.builtin.file:
+            path: "{{ backup_source }}/pre_rollback_{{ rollback_timestamp }}"
+            state: directory
+            mode: '0755'
+          delegate_to: localhost
+          run_once: true
+
+        - name: "Execute current config backup"
+          ansible.builtin.include_tasks: "{{ playbook_dir }}/../retrieve-configs/retrieve-template.yml"
+          vars:
+            backup_directory: "{{ backup_source }}/pre_rollback_{{ rollback_timestamp }}"
+            target_hosts: "{{ inventory_hostname }}"
+
+      when: create_pre_rollback_backup | bool
+      tags: [backup, pre_rollback]
+
+  tasks:
+    # ==========================================================================
+    # DEVICE STATE DETECTION AND VALIDATION
+    # ==========================================================================
+    - name: "Detect current device state"
+      block:
+        - name: "Check current service status"
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+          register: current_services
+          loop:
+            - frr
+            - openvswitch-switch
+          failed_when: false
+
+        - name: "Determine device capabilities"
+          ansible.builtin.set_fact:
+            current_has_frr: >-
+              {{ current_services.results[0].status is defined and 
+                 current_services.results[0].status.ActiveState == "active" }}
+            current_has_ovs: >-
+              {{ current_services.results[1].status is defined and 
+                 current_services.results[1].status.ActiveState == "active" }}
+            target_has_frr: "{{ target_config.services.frr.enabled | default(false) }}"
+            target_has_ovs: "{{ target_config.services.ovs.enabled | default(false) }}"
+
+        - name: "Validate compatibility between current and target states"
+          ansible.builtin.assert:
+            that:
+              - "current_has_frr == target_has_frr or not rollback_types | intersect(['frr_config'])"
+              - "current_has_ovs == target_has_ovs or not rollback_types | intersect(['ovs_config'])"
+            fail_msg: "Service availability mismatch between current and target configurations"
+
+      tags: [detection, validation]
+
+    # ==========================================================================
+    # CONFIGURATION VALIDATION AND DRY RUN
+    # ==========================================================================
+    - name: "Validate and test rollback configuration"
+      block:
+        - name: "Validate FRR configuration syntax"
+          block:
+            - name: "Create temporary FRR config file"
+              ansible.builtin.copy:
+                content: "{{ target_config.configurations.frr.config_file }}"
+                dest: "/tmp/frr_rollback_test.conf"
+                mode: '0644'
+
+            - name: "Test FRR configuration syntax"
+              ansible.builtin.shell: |
+                vtysh -f /tmp/frr_rollback_test.conf --dry-run
+              register: frr_syntax_check
+              failed_when: frr_syntax_check.rc != 0
+              changed_when: false
+
+            - name: "Remove temporary FRR config"
+              ansible.builtin.file:
+                path: "/tmp/frr_rollback_test.conf"
+                state: absent
+
+          when: 
+            - target_has_frr | bool
+            - "'frr_config' in rollback_types"
+            - validate_before_apply | bool
+          tags: [validation, frr]
+
+        - name: "Validate OVS configuration"
+          block:
+            - name: "Parse OVS bridge configuration from backup"
+              ansible.builtin.set_fact:
+                target_ovs_bridges: >-
+                  {{ target_config.configurations.ovs.database_config | 
+                     regex_findall('Bridge\\s+"?([^"\\s]+)"?') }}
+
+            - name: "Validate bridge names"
+              ansible.builtin.assert:
+                that:
+                  - item is match('^[a-zA-Z0-9_-]+$')
+                fail_msg: "Invalid bridge name: {{ item }}"
+              loop: "{{ target_ovs_bridges }}"
+
+          when:
+            - target_has_ovs | bool
+            - "'ovs_config' in rollback_types"
+            - validate_before_apply | bool
+          tags: [validation, ovs]
+
+      when: not dry_run_mode | bool
+      tags: [validation, dry_run]
+
+    # ==========================================================================
+    # STOP SERVICES FOR CONFIGURATION ROLLBACK
+    # ==========================================================================
+    - name: "Prepare services for configuration rollback"
+      block:
+        - name: "Stop FRRouting service"
+          ansible.builtin.systemd:
+            name: frr
+            state: stopped
+          when: 
+            - target_has_frr | bool
+            - "'frr_config' in rollback_types"
+
+        - name: "Stop Open vSwitch service"
+          ansible.builtin.systemd:
+            name: openvswitch-switch
+            state: stopped
+          when:
+            - target_has_ovs | bool
+            - "'ovs_config' in rollback_types"
+
+        - name: "Wait for services to stop completely"
+          ansible.builtin.wait_for:
+            timeout: "{{ service_restart_delay }}"
+          when: restart_services | bool
+
+      when: not dry_run_mode | bool
+      tags: [service_management, stop]
+
+    # ==========================================================================
+    # FRR CONFIGURATION ROLLBACK
+    # ==========================================================================
+    - name: "Rollback FRRouting configuration"
+      block:
+        - name: "Backup current FRR configuration"
+          ansible.builtin.copy:
+            src: "/etc/frr/frr.conf"
+            dest: "/etc/frr/frr.conf.rollback.bak"
+            remote_src: true
+            backup: true
+          when: not dry_run_mode | bool
+
+        - name: "Restore FRR configuration from backup"
+          ansible.builtin.copy:
+            content: "{{ target_config.configurations.frr.config_file }}"
+            dest: "/etc/frr/frr.conf"
+            owner: frr
+            group: frr
+            mode: '0640'
+            backup: true
+          when: not dry_run_mode | bool
+          notify: "restart frr"
+
+        - name: "Restore FRR daemon configuration"
+          ansible.builtin.template:
+            src: "frr_daemons.j2"
+            dest: "/etc/frr/daemons"
+            owner: frr
+            group: frr
+            mode: '0640'
+            backup: true
+          vars:
+            frr_daemons_config: "{{ target_config.configurations.frr.daemons | default('') }}"
+          when: 
+            - not dry_run_mode | bool
+            - target_config.configurations.frr.daemons is defined
+          notify: "restart frr"
+
+        - name: "Display FRR rollback actions (dry run)"
+          ansible.builtin.debug:
+            msg:
+              - "DRY RUN: Would restore FRR configuration"
+              - "Target config size: {{ target_config.configurations.frr.config_file | length }} bytes"
+              - "Configuration timestamp: {{ target_config.metadata.collection_timestamp }}"
+          when: dry_run_mode | bool
+
+      when:
+        - target_has_frr | bool
+        - "'frr_config' in rollback_types"
+      tags: [rollback, frr]
+
+    # ==========================================================================
+    # OPEN VSWITCH CONFIGURATION ROLLBACK
+    # ==========================================================================
+    - name: "Rollback Open vSwitch configuration"
+      block:
+        - name: "Clear current OVS configuration"
+          ansible.builtin.shell: |
+            ovs-vsctl --if-exists del-br {{ item }}
+          loop: "{{ current_ovs_bridges | default([]) }}"
+          when: not dry_run_mode | bool
+          vars:
+            current_ovs_bridges: >-
+              {{ ansible_local.ovs_bridges | default([]) }}
+
+        - name: "Restore OVS bridges from backup"
+          ansible.builtin.shell: |
+            {{ item }}
+          loop: "{{ target_ovs_commands }}"
+          when: 
+            - not dry_run_mode | bool
+            - target_ovs_commands is defined
+          vars:
+            target_ovs_commands: >-
+              {{ target_config.configurations.ovs.database_config | 
+                 regex_findall('(ovs-vsctl\\s+add-br\\s+[^\\n]+)') }}
+
+        - name: "Restore OVS port configuration"
+          ansible.builtin.shell: |
+            {{ item }}
+          loop: "{{ target_ovs_port_commands }}"
+          when:
+            - not dry_run_mode | bool
+            - target_ovs_port_commands is defined
+          vars:
+            target_ovs_port_commands: >-
+              {{ target_config.configurations.ovs.database_config | 
+                 regex_findall('(ovs-vsctl\\s+add-port\\s+[^\\n]+)') }}
+
+        - name: "Display OVS rollback actions (dry run)"
+          ansible.builtin.debug:
+            msg:
+              - "DRY RUN: Would restore OVS configuration"
+              - "Target bridges: {{ target_ovs_bridges | default([]) }}"
+              - "Configuration timestamp: {{ target_config.metadata.collection_timestamp }}"
+          when: dry_run_mode | bool
+
+      when:
+        - target_has_ovs | bool
+        - "'ovs_config' in rollback_types"
+      tags: [rollback, ovs]
+
+    # ==========================================================================
+    # SYSTEM NETWORK INTERFACE ROLLBACK
+    # ==========================================================================
+    - name: "Rollback system network interface configuration"
+      block:
+        - name: "Restore network configuration files"
+          ansible.builtin.copy:
+            content: "{{ item.content | b64decode }}"
+            dest: "{{ item.src }}"
+            backup: true
+            mode: '0644'
+          loop: "{{ target_config.configurations.system.network_files }}"
+          when: 
+            - not dry_run_mode | bool
+            - item.content is defined
+          notify: "restart networking"
+
+        - name: "Display interface rollback actions (dry run)"
+          ansible.builtin.debug:
+            msg:
+              - "DRY RUN: Would restore {{ target_config.configurations.system.network_files | length }} network files"
+              - "Configuration timestamp: {{ target_config.metadata.collection_timestamp }}"
+          when: dry_run_mode | bool
+
+      when: "'interface_config' in rollback_types"
+      tags: [rollback, interfaces]
+
+    # ==========================================================================
+    # SERVICE RESTART AND VERIFICATION
+    # ==========================================================================
+    - name: "Restart services after rollback"
+      block:
+        - name: "Start FRRouting service"
+          ansible.builtin.systemd:
+            name: frr
+            state: started
+            enabled: true
+            daemon_reload: true
+          when: 
+            - target_has_frr | bool
+            - "'frr_config' in rollback_types"
+
+        - name: "Start Open vSwitch service"
+          ansible.builtin.systemd:
+            name: openvswitch-switch
+            state: started
+            enabled: true
+          when:
+            - target_has_ovs | bool
+            - "'ovs_config' in rollback_types"
+
+        - name: "Wait for services to stabilize"
+          ansible.builtin.wait_for:
+            timeout: "{{ service_restart_delay }}"
+
+      when: 
+        - restart_services | bool
+        - not dry_run_mode | bool
+      tags: [service_management, restart]
+
+    # ==========================================================================
+    # ROLLBACK VERIFICATION
+    # ==========================================================================
+    - name: "Verify rollback success"
+      block:
+        - name: "Verify FRR service status"
+          ansible.builtin.systemd:
+            name: frr
+          register: frr_post_rollback_status
+          when: target_has_frr | bool
+
+        - name: "Verify OVS service status"
+          ansible.builtin.systemd:
+            name: openvswitch-switch
+          register: ovs_post_rollback_status
+          when: target_has_ovs | bool
+
+        - name: "Check FRR configuration syntax"
+          ansible.builtin.shell: |
+            vtysh -c 'show running-config' | head -n 5
+          register: frr_config_verify
+          when: target_has_frr | bool
+          changed_when: false
+
+        - name: "Check OVS configuration"
+          ansible.builtin.shell: |
+            ovs-vsctl show
+          register: ovs_config_verify
+          when: target_has_ovs | bool
+          changed_when: false
+
+        - name: "Validate service health"
+          ansible.builtin.assert:
+            that:
+              - "frr_post_rollback_status.status.ActiveState == 'active' or not target_has_frr"
+              - "ovs_post_rollback_status.status.ActiveState == 'active' or not target_has_ovs"
+            fail_msg: "One or more services failed to start after rollback"
+
+      when: 
+        - enable_rollback_verification | bool
+        - not dry_run_mode | bool
+      tags: [verification, validation]
+
+  post_tasks:
+    - name: "Generate rollback summary report"
+      ansible.builtin.debug:
+        msg:
+          - "Rollback {{ 'simulation' if dry_run_mode else 'completed' }} for {{ inventory_hostname }}"
+          - "Target timestamp: {{ target_backup_timestamp }}"
+          - "Rollback types: {{ rollback_types | join(', ') }}"
+          - "Services restarted: {{ restart_services }}"
+      tags: [summary, reporting]
+
+    - name: "Log rollback operation"
+      ansible.builtin.lineinfile:
+        path: "{{ backup_source }}/rollback.log"
+        line: "{{ ansible_date_time.iso8601 }} - {{ inventory_hostname }} - {{ rollback_types | join(',') }} - {{ 'DRY_RUN' if dry_run_mode else 'SUCCESS' }}"
+        create: true
+        mode: '0644'
+      delegate_to: localhost
+      tags: [logging]
+
+  handlers:
+    - name: "restart frr"
+      ansible.builtin.systemd:
+        name: frr
+        state: restarted
+        daemon_reload: true
+      listen: "restart frr"
+
+    - name: "restart networking"
+      ansible.builtin.shell: |
+        systemctl restart networking || systemctl restart systemd-networkd
+      listen: "restart networking"
+      failed_when: false
+
+    - name: "rollback recovery"
+      block:
+        - name: "Restore pre-rollback configuration"
+          ansible.builtin.copy:
+            src: "/etc/frr/frr.conf.rollback.bak"
+            dest: "/etc/frr/frr.conf"
+            remote_src: true
+          when: target_has_frr | bool
+
+        - name: "Restart services for recovery"
+          ansible.builtin.systemd:
+            name: "{{ item }}"
+            state: restarted
+          loop:
+            - frr
+            - openvswitch-switch
+          when: "'{{ item }}' in ['frr'] and target_has_frr or '{{ item }}' in ['openvswitch-switch'] and target_has_ovs"
+
+      listen: "rollback recovery"
+      when: auto_recovery_on_failure | bool
+
+# =============================================================================
+# ERROR HANDLING AND RECOVERY
+# =============================================================================
+- name: "Handle rollback failures"
+  hosts: "{{ target_hosts | default('all') }}"
+  gather_facts: false
+  tasks:
+    - name: "Report rollback failures and initiate recovery"
+      block:
+        - name: "Log rollback failure"
+          ansible.builtin.lineinfile:
+            path: "{{ backup_source }}/rollback.log"
+            line: "{{ ansible_date_time.iso8601 }} - {{ inventory_hostname }} - FAILED - {{ ansible_failed_result.msg | default('Unknown error') }}"
+            create: true
+            mode: '0644'
+          delegate_to: localhost
+
+        - name: "Trigger recovery procedures"
+          ansible.builtin.debug:
+            msg: "Rollback failed for {{ inventory_hostname }}. Recovery procedures should be initiated."
+
+      when: 
+        - ansible_failed_result is defined
+        - auto_recovery_on_failure | bool
+      tags: [error_handling, recovery]
