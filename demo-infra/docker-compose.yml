@@ -1,21 +1,14 @@
-version: '3.8'
-
 networks:
   management:
     driver: bridge
     ipam:
       config:
-        - subnet: 172.20.0.0/24
+        - subnet: 172.25.0.0/24
   client-net:
     driver: bridge
     ipam:
       config:
         - subnet: 192.168.10.0/24
-  router-switch-net:
-    driver: bridge
-    ipam:
-      config:
-        - subnet: 192.168.20.0/24
   server-net:
     driver: bridge
     ipam:
@@ -23,66 +16,81 @@ networks:
         - subnet: 192.168.30.0/24
 
 services:
-  frr-router1:
+  switch1:
+    build: ./ovs-switch
+    container_name: switch1
+    hostname: switch1
+    privileged: true
+    ports:
+      - "7771:22"
+    volumes:
+      - /Users/danielbrandao/.ssh:/root/.ssh:ro
+    networks:
+      management:
+        ipv4_address: 172.25.0.11
+      client-net:
+
+  frr-router:
     build: ./frr-router
     container_name: frr-router
     hostname: frr-router
     privileged: true
+    depends_on:
+      - switch1
+      - switch2
     ports:
       - "7777:22"
     volumes:
-      - ./test-ssh-keys/authorized_keys:/home/frruser/.ssh/authorized_keys:rw
+      - /Users/danielbrandao/.ssh:/root/.ssh:ro
     networks:
-      client-net:
-        ipv4_address: 192.168.10.2
       management:
-        ipv4_address: 172.20.0.10
-      router-switch-net:
-        ipv4_address: 192.168.20.2
+        ipv4_address: 172.25.0.10
+      client-net:
+        ipv4_address: 192.168.10.254
+      server-net:
+        ipv4_address: 192.168.30.254
 
-  ovs-switch1:
+  switch2:
     build: ./ovs-switch
-    container_name: ovs-switch
-    hostname: ovs-switch
+    container_name: switch2
+    hostname: switch2
     privileged: true
     ports:
       - "7778:22"
     volumes:
-      - ./test-ssh-keys/authorized_keys:/home/ovsuser/.ssh/authorized_keys:rw
+      - /Users/danielbrandao/.ssh:/root/.ssh:ro
     networks:
       management:
-        ipv4_address: 172.20.0.11
-      router-switch-net:
-        ipv4_address: 192.168.20.3   # ← was 192.168.20.2, now changed to avoid conflict
+        ipv4_address: 172.25.0.12
       server-net:
-        ipv4_address: 192.168.30.2
 
-  client1:
+  client:
     build: ./client
     container_name: client
     hostname: client
     privileged: true
-    ports:
-      - "7779:22"
-    volumes:
-      - ./test-ssh-keys/authorized_keys:/home/clientuser/.ssh/authorized_keys:rw
+    depends_on:
+      - switch1
     networks:
       management:
-        ipv4_address: 172.20.0.5
+        ipv4_address: 172.25.0.5
       client-net:
         ipv4_address: 192.168.10.10
 
-  server1:
+  server:
     build: ./server
     container_name: server
     hostname: server
     privileged: true
+    depends_on:
+      - switch2
     ports:
       - "7780:22"
+      - "8080:8080"
     volumes:
-      - ./test-ssh-keys/authorized_keys:/home/serveruser/.ssh/authorized_keys:rw
+      - /Users/danielbrandao/.ssh:/root/.ssh:ro
     networks:
       management:
-        ipv4_address: 172.20.0.20
+        ipv4_address: 172.25.0.20
       server-net:
         ipv4_address: 192.168.30.10
