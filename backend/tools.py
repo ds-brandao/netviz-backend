@@ -1,7 +1,7 @@
 import asyncio
 import json
-from typing import Dict, Any, Optional, AsyncGenerator
-from langchain_core.tools import tool
+from typing import Dict, Any, Optional, AsyncGenerator, List
+# Remove langchain dependency - use raw functions
 import paramiko
 import tempfile
 import os
@@ -13,7 +13,6 @@ import requests
 # Backend API configuration for AI tools
 BACKEND_API_BASE = "http://localhost:3001"
 
-@tool
 async def get_network_status(node_name: str = None) -> dict:
     """Get the status of network infrastructure nodes."""
     async with get_db_session() as session:
@@ -56,7 +55,6 @@ async def get_network_status(node_name: str = None) -> dict:
                 ]
             }
 
-@tool
 async def get_node_details(node_name: str) -> dict:
     """Get detailed information about a specific network node."""
     async with get_db_session() as session:
@@ -78,7 +76,6 @@ async def get_node_details(node_name: str) -> dict:
             "last_updated": node.last_updated.isoformat() if node.last_updated else None
         }
 
-@tool
 async def update_node_status(node_name: str, status: str, metadata: Optional[Dict[str, Any]] = None) -> dict:
     """Update the status and metadata of a network node."""
     valid_statuses = ["active", "inactive", "warning", "error", "maintenance"]
@@ -112,7 +109,6 @@ async def update_node_status(node_name: str, status: str, metadata: Optional[Dic
             }
         }
 
-@tool
 def create_ansible_playbook(task_description: str, target_hosts: str = "all") -> str:
     """Create an Ansible playbook based on natural language description."""
     playbook = f"""---
@@ -202,7 +198,6 @@ def create_ansible_playbook(task_description: str, target_hosts: str = "all") ->
     
     return playbook
 
-@tool
 async def execute_ssh_command(host: str, command: str, username: str = "admin", password: Optional[str] = None, key_file: Optional[str] = None) -> Dict[str, Any]:
     """
     Execute SSH command on a remote host with streaming output support.
@@ -265,8 +260,20 @@ async def execute_ssh_command(host: str, command: str, username: str = "admin", 
             "command": command
         }
 
-@tool
-async def run_ansible_playbook(playbook_content: str, inventory: str = "localhost,", extra_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+async def run_ssh_command(host: str, command: str, username: str = "admin", password: Optional[str] = None, key_file: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Execute SSH command on a remote host with streaming output support.
+    
+    Args:
+        host: The hostname or IP to connect to
+        command: The command to execute
+        username: SSH username (default: admin)
+        password: SSH password (optional)
+        key_file: Path to SSH key file (optional)
+    """
+    return await execute_ssh_command(host, command, username, password, key_file)
+
+async def run_ansible_playbook_internal(playbook_content: str, inventory: str = "localhost,", extra_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
     """
     Execute an Ansible playbook with streaming output support.
     The inventory can be a comma-separated list of hosts or a path to an inventory file.
@@ -314,9 +321,19 @@ async def run_ansible_playbook(playbook_content: str, inventory: str = "localhos
             "success": False,
             "error": str(e),
             "playbook_summary": "Failed to execute playbook"
-        } 
+        }
 
-@tool
+async def run_ansible_playbook(playbook_content: str, inventory: str = "localhost,", extra_vars: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    """
+    Execute an Ansible playbook with streaming output support.
+    
+    Args:
+        playbook_content: The YAML content of the playbook
+        inventory: Inventory hosts (default: localhost,)
+        extra_vars: Extra variables for the playbook
+    """
+    return await run_ansible_playbook_internal(playbook_content, inventory, extra_vars)
+
 async def get_recent_logs(device_name: Optional[str] = None, time_range: int = 2, log_level: Optional[str] = None) -> str:
     """Get recent logs from OpenSearch directly"""
     print(f"=== GET_RECENT_LOGS FUNCTION DEBUG ===")
@@ -447,7 +464,6 @@ async def get_recent_logs(device_name: Optional[str] = None, time_range: int = 2
     except Exception as e:
         return f"Error fetching logs: {str(e)}"
 
-@tool  
 async def get_device_info(device_id: str) -> str:
     """Get comprehensive device information including recent logs and metrics"""
     try:
@@ -510,7 +526,6 @@ async def get_device_info(device_id: str) -> str:
     except Exception as e:
         return f"Error getting device info: {str(e)}"
 
-@tool
 async def get_error_logs(hours: int = 24) -> str:
     """Get error and warning logs from the last N hours"""
     try:
@@ -577,7 +592,6 @@ async def get_error_logs(hours: int = 24) -> str:
     except Exception as e:
         return f"Error fetching error logs: {str(e)}"
 
-@tool
 async def search_logs(search_term: str, size: int = 20) -> str:
     """Search logs for specific terms or patterns"""
     try:
@@ -614,4 +628,422 @@ async def search_logs(search_term: str, size: int = 20) -> str:
         return summary
         
     except Exception as e:
-        return f"Error searching logs: {str(e)}" 
+        return f"Error searching logs: {str(e)}"
+
+async def execute_network_playbook(
+    task_description: str, 
+    target_device: str, 
+    playbook_type: str = "auto",
+    extra_parameters: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Execute network automation playbooks by selecting appropriate templates,
+    filling them with device-specific parameters, and running them via Ansible server.
+    
+    Args:
+        task_description: Natural language description of what to do
+        target_device: Device name/identifier (solo_r1, solo_sw1, etc.)
+        playbook_type: Template type - 'retrieve', 'frr', 'ovs', 'rollback', or 'auto'
+        extra_parameters: Additional parameters for playbook customization
+    """
+    try:
+        # Device to inventory mapping
+        device_inventory_map = {
+            "solo_r1": "solo_r1",
+            "solo_sw1": "solo_sw1", 
+            "solo_sw2": "solo_sw2",
+            "solo_ub": "solo_ub",
+            "infra_r1": "infra_r1",
+            "infra_sw1": "infra_sw1",
+            "infra_sw2": "infra_sw2",
+            "router": "solo_r1",
+            "frr-router": "solo_r1",
+            "switch1": "solo_sw1",
+            "switch2": "solo_sw2",
+            "server": "solo_ub"
+        }
+        
+        # Determine target hosts for Ansible
+        target_hosts = device_inventory_map.get(target_device, target_device)
+        
+        # Auto-detect playbook type if needed
+        if playbook_type == "auto":
+            task_lower = task_description.lower()
+            if any(word in task_lower for word in ["retrieve", "get", "backup", "show", "configuration"]):
+                if any(word in task_lower for word in ["router", "routing", "frr", "bgp", "ospf"]):
+                    playbook_type = "frr"
+                elif any(word in task_lower for word in ["switch", "bridge", "flow", "ovs"]):
+                    playbook_type = "ovs"
+                else:
+                    playbook_type = "retrieve"
+            elif any(word in task_lower for word in ["rollback", "restore", "revert"]):
+                playbook_type = "rollback"
+            else:
+                playbook_type = "retrieve"  # Default fallback
+        
+        # Select appropriate template
+        template_map = {
+            "retrieve": "retrieve-configs/retrieve-template.yml",
+            "frr": "retrieve-configs/frr-config-retrieval.yml", 
+            "ovs": "retrieve-configs/ovs-config-retrieval.yml",
+            "rollback": "rollback-configs/rollback-template.yml"
+        }
+        
+        playbook_template = template_map.get(playbook_type, "retrieve-configs/retrieve-template.yml")
+        
+        # Build playbook variables based on task and device
+        playbook_vars = {
+            "target_hosts": target_hosts,
+            "config_output_format": "json",
+            "store_configs_locally": True,
+            "batch_size": 1
+        }
+        
+        # Add type-specific variables
+        if playbook_type == "frr":
+            playbook_vars.update({
+                "include_diagnostics": True,
+                "compress_frr_backup": False,
+                "frr_command_timeout": 30
+            })
+        elif playbook_type == "ovs":
+            playbook_vars.update({
+                "include_flow_details": True,
+                "include_statistics": True,
+                "flow_format": "openflow13",
+                "compress_ovs_backup": False
+            })
+        elif playbook_type == "rollback":
+            if not extra_parameters or "rollback_target_timestamp" not in extra_parameters:
+                return {
+                    "success": False,
+                    "error": "Rollback operations require 'rollback_target_timestamp' parameter"
+                }
+            playbook_vars.update({
+                "rollback_target_timestamp": extra_parameters["rollback_target_timestamp"],
+                "rollback_types": ["frr_config", "ovs_config"],
+                "backup_before_rollback": True,
+                "rollback_dry_run": False,
+                "validate_rollback_config": True
+            })
+        
+        # Merge any extra parameters
+        if extra_parameters:
+            playbook_vars.update(extra_parameters)
+        
+        # Execute playbook from Ansible server using existing inventory
+        # The Ansible server already has all host configurations in its inventory
+        
+        # Create simplified ansible tasks based on playbook type  
+        if playbook_type == "frr":
+            playbook_content = f"""---
+- name: Retrieve FRR Configuration from {target_hosts}
+  hosts: {target_hosts}
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Get FRR running configuration
+      shell: vtysh -c 'show running-config'
+      register: frr_config
+      failed_when: false
+      
+    - name: Get FRR BGP summary
+      shell: vtysh -c 'show ip bgp summary'
+      register: bgp_summary
+      failed_when: false
+      
+    - name: Get FRR routing table
+      shell: vtysh -c 'show ip route'
+      register: route_table
+      failed_when: false
+      
+    - name: Display results
+      debug:
+        msg:
+          - "FRR Config: {{{{ frr_config.stdout }}}}"
+          - "BGP Summary: {{{{ bgp_summary.stdout }}}}"
+          - "Routing Table: {{{{ route_table.stdout }}}}"
+"""
+        elif playbook_type == "ovs":
+            playbook_content = f"""---
+- name: Retrieve OVS Configuration from {target_hosts}
+  hosts: {target_hosts}
+  become: yes
+  gather_facts: false
+  tasks:
+    - name: Get OVS database configuration
+      shell: ovs-vsctl show
+      register: ovs_show
+      failed_when: false
+      
+    - name: Get OVS bridge list
+      shell: ovs-vsctl list bridge
+      register: ovs_bridges
+      failed_when: false
+      
+    - name: Get bridge flow tables
+      shell: ovs-ofctl dump-flows br0
+      register: flow_tables
+      failed_when: false
+      
+    - name: Display results
+      debug:
+        msg:
+          - "OVS Show: {{{{ ovs_show.stdout }}}}"
+          - "Bridges: {{{{ ovs_bridges.stdout }}}}"
+          - "Flow Tables: {{{{ flow_tables.stdout }}}}"
+"""
+        else:  # retrieve/general
+            playbook_content = f"""---
+- name: Retrieve General Configuration from {target_hosts}
+  hosts: {target_hosts}
+  become: yes
+  gather_facts: true
+  tasks:
+    - name: Get network interfaces
+      shell: ip addr show
+      register: interfaces
+      failed_when: false
+      
+    - name: Get routing table
+      shell: ip route show
+      register: routes
+      failed_when: false
+      
+    - name: Get system services
+      shell: systemctl --type=service --state=running
+      register: services
+      failed_when: false
+      
+    - name: Display results
+      debug:
+        msg:
+          - "Interfaces: {{{{ interfaces.stdout }}}}"
+          - "Routes: {{{{ routes.stdout }}}}"
+          - "Services: {{{{ services.stdout }}}}"
+"""
+
+        # Use base64 encoding to avoid shell escaping issues
+        import base64
+        
+        # Encode playbook content
+        playbook_b64 = base64.b64encode(playbook_content.encode()).decode()
+        
+        # Create the full command to execute on ansible server
+        # Use existing inventory that's already configured on the server
+        ansible_commands = [
+            # Create temporary directory for this execution
+            "TEMP_DIR=$(mktemp -d)",
+            
+            # Create playbook file from base64
+            f"echo '{playbook_b64}' | base64 -d > $TEMP_DIR/playbook.yml",
+            
+            # Execute the playbook using existing inventory
+            f"cd $TEMP_DIR && ansible-playbook playbook.yml -v",
+            
+            # Clean up
+            "rm -rf $TEMP_DIR"
+        ]
+        
+        full_command = " && ".join(ansible_commands)
+        
+        # Add debug information
+        print(f"=== ANSIBLE EXECUTION DEBUG ===")
+        print(f"Connecting to Ansible server: jack@192.168.0.131")
+        print(f"Target device: {target_device} -> {target_hosts}")
+        print(f"Playbook type: {playbook_type}")
+        print(f"Command length: {len(full_command)} characters")
+        
+        # Execute on Ansible server via SSH
+        ssh_result = await execute_ssh_command(
+            host="192.168.0.131",
+            username="jack", 
+            password="password",
+            command=full_command
+        )
+        
+        print(f"SSH Result: success={ssh_result.get('success', False)}")
+        print(f"SSH Exit Code: {ssh_result.get('exit_code', 'N/A')}")
+        print(f"SSH Output Length: {len(ssh_result.get('output', ''))}")
+        print(f"SSH Error Length: {len(ssh_result.get('error', ''))}")
+        
+        if not ssh_result["success"]:
+            error_details = {
+                "ssh_exit_code": ssh_result.get("exit_code"),
+                "ssh_output": ssh_result.get("output", ""),
+                "ssh_error": ssh_result.get("error", ""),
+                "command_executed": full_command[:500] + "..." if len(full_command) > 500 else full_command
+            }
+            return {
+                "success": False,
+                "error": f"SSH execution failed: {ssh_result.get('error', 'Unknown error')}",
+                "error_details": error_details
+            }
+        
+        # Parse Ansible output for success/failure
+        output = ssh_result.get("output", "")
+        error_output = ssh_result.get("error", "")
+        
+        # Determine if playbook was successful by checking PLAY RECAP
+        is_successful = False
+        has_failures = False
+        
+        if "PLAY RECAP" in output:
+            # Look for the recap line that shows results
+            recap_lines = output.split('\n')
+            for line in recap_lines:
+                if target_hosts in line and "ok=" in line:
+                    # Parse the recap line: "solo_r1 : ok=4 changed=3 unreachable=0 failed=0"
+                    if "unreachable=0" in line and "failed=0" in line:
+                        is_successful = True
+                    elif "unreachable=" in line and not "unreachable=0" in line:
+                        has_failures = True
+                    elif "failed=" in line and not "failed=0" in line:
+                        has_failures = True
+                    break
+        
+        # Also check for explicit failure indicators
+        failure_indicators = ["FAILED!", "fatal:", "ERROR!"]
+        if any(indicator in output for indicator in failure_indicators):
+            has_failures = True
+        
+        # Extract configuration data from ansible debug output
+        config_data = {}
+        
+        # Look for the debug task output that contains our formatted data
+        if '"FRR Config:' in output:
+            # Parse the structured output from ansible debug task
+            import re
+            
+            # Extract FRR Config
+            frr_match = re.search(r'"FRR Config: ([^"]+)"', output)
+            if frr_match:
+                config_data["frr_config"] = frr_match.group(1).replace('\\n', '\n')
+            
+            # Extract BGP Summary  
+            bgp_match = re.search(r'"BGP Summary: ([^"]+)"', output)
+            if bgp_match:
+                config_data["bgp_summary"] = bgp_match.group(1).replace('\\n', '\n')
+            
+            # Extract Routing Table
+            route_match = re.search(r'"Routing Table: ([^"]+)"', output)
+            if route_match:
+                config_data["routing_table"] = route_match.group(1).replace('\\n', '\n')
+                
+        elif '"OVS Show:' in output:
+            # Parse OVS output similarly
+            import re
+            
+            # Extract OVS Show
+            ovs_match = re.search(r'"OVS Show: ([^"]+)"', output)
+            if ovs_match:
+                config_data["ovs_show"] = ovs_match.group(1).replace('\\n', '\n')
+            
+            # Extract Bridges
+            bridge_match = re.search(r'"Bridges: ([^"]+)"', output)
+            if bridge_match:
+                config_data["bridges"] = bridge_match.group(1).replace('\\n', '\n')
+            
+            # Extract Flow Tables
+            flow_match = re.search(r'"Flow Tables: ([^"]+)"', output)
+            if flow_match:
+                config_data["flow_tables"] = flow_match.group(1).replace('\\n', '\n')
+        
+        return {
+            "success": is_successful and not has_failures,
+            "playbook_type": playbook_type,
+            "target_device": target_device,
+            "target_hosts": target_hosts,
+            "task_description": task_description,
+            "variables_used": playbook_vars,
+            "ansible_output": output,
+            "error_output": error_output if error_output else None,
+            "configuration_data": config_data,
+            "summary": f"Successfully executed {playbook_type} playbook on {target_device} via Ansible server",
+            "execution_method": "ansible_server_ssh"
+        }
+        
+    except Exception as e:
+        return {
+            "success": False,
+            "error": f"Failed to execute network playbook: {str(e)}",
+            "task_description": task_description,
+            "target_device": target_device
+        }
+
+async def run_network_playbook(
+    task_description: str, 
+    target_device: str, 
+    playbook_type: str = "auto",
+    extra_parameters: Optional[Dict[str, Any]] = None
+) -> Dict[str, Any]:
+    """
+    Execute network automation playbooks for device configuration and management.
+    
+    Args:
+        task_description: Natural language description of the task
+        target_device: Device name (solo_r1, solo_sw1, solo_sw2, router, switch1, etc.)
+        playbook_type: Template type: 'retrieve', 'frr', 'ovs', 'rollback', or 'auto' (default: auto)
+        extra_parameters: Additional parameters for playbook customization
+    """
+    return await execute_network_playbook(task_description, target_device, playbook_type, extra_parameters)
+
+async def get_device_configuration(device_name: str, config_type: str = "all") -> Dict[str, Any]:
+    """
+    Retrieve current configuration from a network device using appropriate playbook.
+    
+    Args:
+        device_name: Name of the device (solo_r1, solo_sw1, etc.)
+        config_type: Type of config to retrieve ('frr', 'ovs', 'all')
+    """
+    # Map config type to playbook type
+    type_mapping = {
+        "frr": "frr",
+        "routing": "frr", 
+        "router": "frr",
+        "ovs": "ovs",
+        "switch": "ovs",
+        "bridge": "ovs",
+        "all": "retrieve"
+    }
+    
+    playbook_type = type_mapping.get(config_type.lower(), "retrieve")
+    
+    return await execute_network_playbook(
+        task_description=f"Retrieve {config_type} configuration from {device_name}",
+        target_device=device_name,
+        playbook_type=playbook_type
+    )
+
+async def rollback_device_configuration(
+    device_name: str, 
+    backup_timestamp: str, 
+    config_types: Optional[List[str]] = None,
+    dry_run: bool = True
+) -> Dict[str, Any]:
+    """
+    Rollback device configuration to a previous backup.
+    
+    Args:
+        device_name: Name of the device to rollback
+        backup_timestamp: Unix timestamp of the backup to restore  
+        config_types: List of config types to rollback ('frr_config', 'ovs_config')
+        dry_run: Whether to perform a dry run first (recommended)
+    """
+    if not config_types:
+        config_types = ["frr_config", "ovs_config"]
+    
+    extra_params = {
+        "rollback_target_timestamp": backup_timestamp,
+        "rollback_types": config_types,
+        "rollback_dry_run": dry_run,
+        "backup_before_rollback": True,
+        "validate_rollback_config": True
+    }
+    
+    return await execute_network_playbook(
+        task_description=f"Rollback {device_name} to backup {backup_timestamp}",
+        target_device=device_name,
+        playbook_type="rollback",
+        extra_parameters=extra_params
+    ) 

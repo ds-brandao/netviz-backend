@@ -8,14 +8,17 @@ from llama_api_client import LlamaAPIClient
 from tools import (
     get_network_status, 
     create_ansible_playbook, 
-    execute_ssh_command,
+    run_ssh_command,
     run_ansible_playbook,
     get_node_details,
     update_node_status,
     get_recent_logs,
     get_error_logs,
     search_logs,
-    get_device_info
+    get_device_info,
+    run_network_playbook,
+    get_device_configuration,
+    rollback_device_configuration
 )
 
 load_dotenv()
@@ -200,7 +203,7 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
-            "name": "execute_ssh_command",
+            "name": "run_ssh_command",
             "description": "Execute SSH command on a remote host",
             "parameters": {
                 "type": "object",
@@ -258,6 +261,92 @@ TOOL_DEFINITIONS = [
             },
             "strict": True
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_network_playbook",
+            "description": "Execute network automation playbooks for device configuration and management",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task_description": {
+                        "type": "string",
+                        "description": "Natural language description of the task"
+                    },
+                    "target_device": {
+                        "type": "string",
+                        "description": "Device name (solo_r1, solo_sw1, solo_sw2, router, switch1, etc.)"
+                    },
+                    "playbook_type": {
+                        "type": "string",
+                        "description": "Template type: 'retrieve', 'frr', 'ovs', 'rollback', or 'auto' (default: auto)"
+                    },
+                    "extra_parameters": {
+                        "type": "object",
+                        "description": "Additional parameters for playbook customization"
+                    }
+                },
+                "required": ["task_description", "target_device"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_device_configuration",
+            "description": "Retrieve current configuration from a network device",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device_name": {
+                        "type": "string",
+                        "description": "Name of the device (solo_r1, solo_sw1, etc.)"
+                    },
+                    "config_type": {
+                        "type": "string",
+                        "description": "Type of config to retrieve: 'frr', 'ovs', 'all' (default: all)"
+                    }
+                },
+                "required": ["device_name"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rollback_device_configuration",
+            "description": "Rollback device configuration to a previous backup",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "device_name": {
+                        "type": "string",
+                        "description": "Name of the device to rollback"
+                    },
+                    "backup_timestamp": {
+                        "type": "string",
+                        "description": "Unix timestamp of the backup to restore"
+                    },
+                    "config_types": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "List of config types to rollback ('frr_config', 'ovs_config')"
+                    },
+                    "dry_run": {
+                        "type": "boolean",
+                        "description": "Whether to perform a dry run first (default: true)"
+                    }
+                },
+                "required": ["device_name", "backup_timestamp"],
+                "additionalProperties": False
+            },
+            "strict": True
+        }
     }
 ]
 
@@ -271,8 +360,11 @@ TOOL_MAPPING = {
     "search_logs": search_logs,
     "get_device_info": get_device_info,
     "create_ansible_playbook": create_ansible_playbook,
-    "execute_ssh_command": execute_ssh_command,
-    "run_ansible_playbook": run_ansible_playbook
+    "run_ssh_command": run_ssh_command,
+    "run_ansible_playbook": run_ansible_playbook,
+    "run_network_playbook": run_network_playbook,
+    "get_device_configuration": get_device_configuration,
+    "rollback_device_configuration": rollback_device_configuration
 }
 
 def build_system_prompt(context: Optional[Dict[str, Any]] = None) -> str:
@@ -288,9 +380,19 @@ You have access to the following tools:
 - get_error_logs: Get error/warning logs for troubleshooting
 - search_logs: Search logs for specific patterns
 - get_device_info: Get comprehensive device information
-- execute_ssh_command: Run SSH commands on remote hosts
+- run_ssh_command: Run SSH commands on remote hosts
 - create_ansible_playbook: Create Ansible automation playbooks
 - run_ansible_playbook: Execute Ansible playbooks
+- run_network_playbook: Execute network automation playbooks for device configuration management
+- get_device_configuration: Retrieve current configuration from network devices
+- rollback_device_configuration: Rollback device configurations to previous backups
+
+NETWORK DEVICE MANAGEMENT:
+For network configuration tasks, use the specialized network playbook tools:
+- Use run_network_playbook for general network automation tasks
+- Use get_device_configuration to retrieve configurations from devices (routers, switches)
+- Use rollback_device_configuration to restore previous configurations
+- Available devices: solo_r1 (router), solo_sw1/solo_sw2 (switches), solo_ub (server)
 
 IMPORTANT: Always use the appropriate tool when users ask for network status, logs, or device information. Never simulate or make up data."""
     
@@ -320,32 +422,8 @@ async def execute_tool(tool_name: str, args: Dict[str, Any]) -> Any:
     print(f"has invoke: {hasattr(tool_func, 'invoke')}")
     print(f"is coroutine: {asyncio.iscoroutinefunction(tool_func)}")
     
-    # Handle LangChain tools
-    if hasattr(tool_func, 'ainvoke'):
-        print(f"LangChain tool detected, calling underlying function directly")
-        # Skip LangChain's ainvoke and call the underlying function directly
-        if hasattr(tool_func, 'coroutine'):
-            print(f"Calling coroutine directly with **args: {args}")
-            return await tool_func.coroutine(**args)
-        elif hasattr(tool_func, 'func'):
-            print(f"Calling underlying function directly with **args: {args}")
-            return await tool_func.func(**args)
-        else:
-            print(f"Fallback: trying ainvoke with args: {args}")
-            return await tool_func.ainvoke(args)
-    elif hasattr(tool_func, 'invoke'):
-        print(f"Calling invoke with args: {args}")
-        try:
-            return tool_func.invoke(args)
-        except Exception as e:
-            print(f"invoke failed with dict args: {e}")
-            # Try calling the underlying function directly
-            if hasattr(tool_func, 'func'):
-                print(f"Calling underlying function directly with **args")
-                return tool_func.func(**args)
-            else:
-                raise e
-    elif asyncio.iscoroutinefunction(tool_func):
+    # Since we removed langchain decorators, call functions directly
+    if asyncio.iscoroutinefunction(tool_func):
         print(f"Calling async function with **args: {args}")
         return await tool_func(**args)
     else:
@@ -497,7 +575,10 @@ async def agent_streaming_chat(
                                 print(f"About to execute tool {func_name} with args {args}")
                                 result = await execute_tool(func_name, args)
                                 print(f"Tool {func_name} completed successfully, result length: {len(str(result))}")
-                                print(f"Tool result preview: {str(result)[:200]}...")
+                                if isinstance(result, dict) and not result.get("success", True):
+                                    print(f"Tool result (FAILED): {result}")
+                                else:
+                                    print(f"Tool result preview: {str(result)[:200]}...")
                                 
                                 # Store result for context
                                 tool_results.append({
@@ -524,6 +605,50 @@ async def agent_streaming_chat(
                     # After executing parsed tool calls, generate a follow-up response with tool results
                     if tool_results:
                         try:
+                            # Check if this is a configuration tool that should show raw output
+                            config_tools = ["get_device_configuration", "run_network_playbook", "rollback_device_configuration"]
+                            is_config_request = any(tr['function'] in config_tools for tr in tool_results)
+                            
+                            if is_config_request:
+                                # For configuration tools, show the raw ansible output
+                                print("=== CONFIG REQUEST DETECTED ===")
+                                for tr in tool_results:
+                                    if tr['function'] in config_tools and isinstance(tr['result'], dict):
+                                        result = tr['result']
+                                        print(f"Processing result for {tr['function']}: success={result.get('success')}")
+                                        print(f"Has ansible_output: {'ansible_output' in result}")
+                                        
+                                        if result.get('success') and 'ansible_output' in result:
+                                            # Return the raw ansible output formatted for the UI
+                                            ansible_output = result['ansible_output']
+                                            device_name = tr['args'].get('device_name', tr['args'].get('target_device', 'device'))
+                                            
+                                            formatted_output = f"# Configuration Retrieved from {device_name}\n\n"
+                                            formatted_output += "## Ansible Execution Output\n\n"
+                                            formatted_output += f"```\n{ansible_output}\n```\n\n"
+                                            
+                                            # Also show extracted config data if available
+                                            if 'configuration_data' in result and result['configuration_data']:
+                                                formatted_output += "## Extracted Configuration Data\n\n"
+                                                config_data = result['configuration_data']
+                                                for key, value in config_data.items():
+                                                    formatted_output += f"### {key.replace('_', ' ').title()}\n```\n{value}\n```\n\n"
+                                            
+                                            print(f"=== SENDING CONFIG RESPONSE (length: {len(formatted_output)}) ===")
+                                            
+                                            # Send the formatted output
+                                            yield {
+                                                "type": "content", 
+                                                "text": formatted_output
+                                            }
+                                            return
+                                        else:
+                                            print(f"Config tool failed or missing ansible_output: {result}")
+                                
+                                print("=== NO VALID CONFIG RESULTS FOUND ===")
+                                # Fall through to standard processing if no valid config results
+                            
+                            # For non-config tools, use the standard LLM follow-up
                             # Build context message with tool results
                             results_summary = "Tool execution results:\n"
                             for tr in tool_results:

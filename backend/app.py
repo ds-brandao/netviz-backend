@@ -982,9 +982,11 @@ async def stream_chat(request: StreamingChatRequest):
                 
                 # Try using the agent streaming chat function with tools
                 async for chunk in agent_streaming_chat(request.message, request.context, conversation_history):
-                    if chunk["type"] == "text":
-                        full_response += chunk["content"]
-                        yield f"data: {json.dumps(chunk)}\n\n"
+                    if chunk["type"] == "text" or chunk["type"] == "content":
+                        content = chunk.get("content") or chunk.get("text", "")
+                        full_response += content
+                        # Normalize to 'text' type for frontend compatibility
+                        yield f"data: {json.dumps({'type': 'text', 'content': content})}\n\n"
                     elif chunk["type"] == "tool_result":
                         yield f"data: {json.dumps(chunk)}\n\n"
                     elif chunk["type"] == "done":
