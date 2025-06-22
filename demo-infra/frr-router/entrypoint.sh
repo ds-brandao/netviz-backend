@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Setup logging
+LOG_DIR="/var/log/frr-router"
+mkdir -p "$LOG_DIR"
+exec 1> >(tee -a "$LOG_DIR/router.log")
+exec 2> >(tee -a "$LOG_DIR/router-error.log")
+
 # Copy SSH keys from mounted volume to both root and frruser
 if [ -d /root/.ssh ]; then
     echo "SSH keys directory found at /root/.ssh"
@@ -71,12 +77,23 @@ echo "Setting up passwords..."
 echo 'root:ansible123' | chpasswd
 echo 'frruser:ansible123' | chpasswd
 
+# Configure SSH logging
+echo "Configuring SSH logging..."
+echo "SyslogFacility LOCAL0" >> /etc/ssh/sshd_config
+echo "LogLevel INFO" >> /etc/ssh/sshd_config
+
 # Start SSH
 echo "Starting SSH..."
 service ssh start
 
 # Gateway IPs already assigned by Docker - no need to add them manually
 echo "Using Docker-assigned gateway IPs..."
+
+# Configure FRR logging
+echo "Configuring FRR logging..."
+mkdir -p /etc/frr
+echo "log file $LOG_DIR/frr.log" >> /etc/frr/vtysh.conf
+echo "log commands" >> /etc/frr/vtysh.conf
 
 # Start FRR
 echo "Starting FRR..."
@@ -108,6 +125,23 @@ ip route show
 echo ""
 echo "IP forwarding status:"
 cat /proc/sys/net/ipv4/ip_forward
+
+# Start continuous logging process
+echo "$(date): Router container startup completed" >> "$LOG_DIR/system.log"
+
+# Log routing table changes and system metrics
+(
+  while true; do
+    echo "$(date): Routing table:" >> "$LOG_DIR/system.log"
+    ip route show >> "$LOG_DIR/system.log" 2>&1
+    echo "$(date): Interface stats:" >> "$LOG_DIR/system.log"
+    ip -s link show >> "$LOG_DIR/system.log" 2>&1
+    echo "$(date): FRR status:" >> "$LOG_DIR/system.log"
+    vtysh -c "show ip route" >> "$LOG_DIR/system.log" 2>&1 || true
+    echo "$(date): Memory usage: $(free -h | grep Mem)" >> "$LOG_DIR/system.log"
+    sleep 60
+  done
+) &
 
 # Keep container running efficiently
 exec sleep infinity

@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Setup logging (dynamic based on hostname)
+LOG_DIR="/var/log/$(hostname)"
+mkdir -p "$LOG_DIR"
+exec 1> >(tee -a "$LOG_DIR/switch.log")
+exec 2> >(tee -a "$LOG_DIR/switch-error.log")
+
 # Copy SSH keys from mounted volume to both root and ovsuser
 if [ -d /root/.ssh ]; then
     echo "SSH keys directory found at /root/.ssh"
@@ -76,9 +82,18 @@ echo "Setting up passwords..."
 echo 'root:ansible123' | chpasswd
 echo 'ovsuser:ansible123' | chpasswd
 
-# Start SSH  
+# Configure SSH logging
+echo "Configuring SSH logging..."
+echo "SyslogFacility LOCAL0" >> /etc/ssh/sshd_config
+echo "LogLevel INFO" >> /etc/ssh/sshd_config
+
+# Start SSH with logging
 echo "Starting SSH..."
 service ssh start
+
+# Start logging SSH to file
+rsyslog &
+logger -p local0.info "SSH service started for switch" >> "$LOG_DIR/ssh.log" 2>&1 &
 
 echo "Services started successfully"
 echo "SSH: $(service ssh status | grep Active || echo 'Status unknown')"
@@ -90,6 +105,19 @@ sleep 2
 echo ""
 echo "Interface configuration:"
 ip addr show
+
+# Start continuous logging process
+echo "$(date): Switch container startup completed" >> "$LOG_DIR/system.log"
+
+# Log system metrics periodically
+(
+  while true; do
+    echo "$(date): Interface stats:" >> "$LOG_DIR/system.log"
+    ip -s link show >> "$LOG_DIR/system.log" 2>&1
+    echo "$(date): Memory usage: $(free -h | grep Mem)" >> "$LOG_DIR/system.log"
+    sleep 60
+  done
+) &
 
 # Keep container running efficiently
 exec sleep infinity 
