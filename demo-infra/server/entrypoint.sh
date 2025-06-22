@@ -46,6 +46,11 @@ iptables -A OUTPUT -o $MGMT_IF -d 172.25.0.0/24 -j DROP
 iptables -I OUTPUT -o $MGMT_IF -d 172.25.0.1 -j ACCEPT
 iptables -I INPUT -i $MGMT_IF -s 172.25.0.1 -j ACCEPT
 
+# Set passwords for SSH access
+echo "Setting up passwords..."
+echo 'root:ansible123' | chpasswd
+echo 'serveruser:ansible123' | chpasswd
+
 # Start SSH
 echo "Starting SSH..."
 service ssh start
