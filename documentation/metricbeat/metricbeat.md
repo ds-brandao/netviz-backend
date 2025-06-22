@@ -6,8 +6,8 @@ This monitoring system provides a minimal-footprint solution for tracking server
 
 The monitoring system consists of two main components:
 
-- **lightweight-monitor.sh**: The core monitoring script that collects and sends metrics
-- **install-lightweight.sh**: Installation script that sets up the monitoring as a systemd service
+- **monitoring/lightweight-monitor.sh**: The core monitoring script that collects and sends metrics
+- **monitoring/install-lightweight.sh**: Installation script that sets up the monitoring as a systemd service
 
 ## How It Works
 
