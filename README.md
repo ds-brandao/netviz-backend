@@ -1,4 +1,12 @@
-# Self-Healing Network
+# netwiz
+
+<img src="documentation/wizard-logo.png" alt="Netwiz Logo" width="64" height="64" align="left" style="margin-right: 16px;">
+
+**netwiz** - A powerful network visualization and monitoring platform with AI-powered assistance.
+
+<br clear="left">
+
+## Overview
 
 A self-healing network system that uses AI and Ansible to detect, roll back, and adjust network configurations.
 

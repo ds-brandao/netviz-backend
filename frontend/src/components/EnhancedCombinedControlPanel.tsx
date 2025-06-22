@@ -11,7 +11,6 @@ import {
   MessageSquare, 
   ChevronDown,
   ChevronUp,
-  Network,
   Cog,
   Send,
   Loader2,
@@ -33,8 +32,9 @@ import {
   Copy,
   Download
 } from 'lucide-react';
-import { NetworkNode, LayoutMode, FilterLayer } from '../types/network';
+import { NetworkNode, LayoutMode } from '../types/network';
 import { ApiService } from '../services/api';
+import remarkGfm from 'remark-gfm';
 
 interface ChatSession {
   id: string;
@@ -47,9 +47,7 @@ interface ChatSession {
 interface EnhancedCombinedControlPanelProps {
   focusedNode: NetworkNode | null;
   onLayoutChange: (layout: LayoutMode) => void;
-  onFilterChange: (layers: FilterLayer[]) => void;
   onResetView: () => void;
-  activeLayers: FilterLayer[];
   currentLayout: LayoutMode;
   onOpenSettings: () => void;
   networkStats: {
@@ -88,9 +86,7 @@ interface Message {
 export const EnhancedCombinedControlPanel: React.FC<EnhancedCombinedControlPanelProps> = ({
   focusedNode,
   onLayoutChange,
-  onFilterChange,
   onResetView,
-  activeLayers,
   currentLayout,
   onOpenSettings,
   networkStats
@@ -232,7 +228,60 @@ export const EnhancedCombinedControlPanel: React.FC<EnhancedCombinedControlPanel
       );
     }
     
-    // Default text content
+    // Default: render as markdown for assistant messages, plain text for others
+    if (message.role === 'assistant') {
+      return (
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            p: (props) => <p className="text-xs mb-2" {...props} />,
+            h1: (props) => <h1 className="text-sm font-bold mb-2" {...props} />,
+            h2: (props) => <h2 className="text-xs font-bold mb-2" {...props} />,
+            h3: (props) => <h3 className="text-xs font-semibold mb-1" {...props} />,
+            li: (props) => <li className="text-xs" {...props} />,
+            ul: (props) => <ul className="text-xs mb-2 ml-4 list-disc" {...props} />,
+            ol: (props) => <ol className="text-xs mb-2 ml-4 list-decimal" {...props} />,
+            a: (props) => <a className="text-blue-400 hover:text-blue-500 underline" {...props} />,
+            code: ({ className, children, ...props }) => {
+              const match = /language-(\w+)/.exec(className || '');
+              const language = match ? match[1] : '';
+              
+              if (language) {
+                return (
+                  <SyntaxHighlighter
+                    language={language}
+                    style={syntaxTheme as { [key: string]: React.CSSProperties }}
+                    customStyle={{
+                      fontSize: '11px',
+                      padding: '8px',
+                      margin: '4px 0',
+                      borderRadius: '4px'
+                    }}
+                  >
+                    {String(children).replace(/\n$/, '')}
+                  </SyntaxHighlighter>
+                );
+              }
+              
+              return (
+                <code className="bg-gray-200 dark:bg-gray-700 px-1 py-0.5 rounded text-xs" {...props}>
+                  {children}
+                </code>
+              );
+            },
+            blockquote: (props) => (
+              <blockquote className="border-l-4 border-blue-400 pl-3 py-1 my-2 text-xs italic" {...props} />
+            ),
+            strong: (props) => <strong className="font-semibold" {...props} />,
+            em: (props) => <em className="italic" {...props} />
+          }}
+        >
+          {message.content}
+        </ReactMarkdown>
+      );
+    }
+    
+    // Default text content for non-assistant messages
     return <div className="whitespace-pre-wrap">{message.content}</div>;
   };
 
@@ -266,7 +315,10 @@ export const EnhancedCombinedControlPanel: React.FC<EnhancedCombinedControlPanel
   const abortControllerRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Scroll to the bottom of the chat messages
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'instant' });
+    }, 0);
   }, [chatSessions]);
 
   // Load chat history when component mounts or active session changes
@@ -292,6 +344,20 @@ export const EnhancedCombinedControlPanel: React.FC<EnhancedCombinedControlPanel
 
     loadExistingSessions();
   }, []); // Only run on mount
+
+  // Scroll to bottom whenever chat tab is accessed
+  useEffect(() => {
+    if (activeTab === 'chat') {
+      const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      };
+      
+      // Use a small delay to ensure DOM has updated
+      const timeoutId = setTimeout(scrollToBottom, 100);
+      
+      return () => clearTimeout(timeoutId);
+    }
+  }, [activeTab]);
 
   const getCurrentSession = () => {
     return chatSessions.find(session => session.id === activeChatSession);
@@ -585,51 +651,15 @@ How can I help you today?`,
     setActiveChatSession(newSessionId);
   };
 
-  const addDemoContent = (type: 'ssh' | 'ansible' | 'markdown' | 'code') => {
+  const createAnsiblePlaybookForNginx = () => {
     const currentSession = getCurrentSession();
     if (!currentSession) return;
 
-    let demoMessage: Message;
-
-    switch (type) {
-      case 'ssh':
-        demoMessage = {
-          id: `demo-ssh-${Date.now()}`,
-          role: 'assistant',
-          content: '',
-          contentType: 'ssh_session',
-          ssh_session: {
-            host: '192.168.1.10',
-            status: 'connected',
-            output: [
-              'Last login: Wed Dec 11 10:30:15 2024 from 192.168.1.100',
-              'admin@router:~$ ps aux | grep nginx',
-              'root      1234  0.1  0.5  12345  6789 ?        Ss   10:25   0:01 nginx: master process',
-              'www-data  1235  0.0  0.3   8901  2345 ?        S    10:25   0:00 nginx: worker process',
-              'admin@router:~$ systemctl status nginx',
-              '● nginx.service - A high performance web server',
-              '   Loaded: loaded (/lib/systemd/system/nginx.service; enabled)',
-              '   Active: active (running) since Wed 2024-12-11 10:25:30 UTC; 5min ago',
-              'admin@router:~$ '
-            ],
-            current_command: 'top'
-          },
-          timestamp: new Date()
-        };
-        break;
-
-      case 'ansible':
-        demoMessage = {
-          id: `demo-ansible-${Date.now()}`,
-          role: 'assistant',
-          content: `---
+    const playbookContent = `---
 - name: Install and configure Nginx
-  hosts: webservers
+  hosts: all
   become: yes
-  vars:
-    nginx_port: 80
-    server_name: example.com
-    
+  
   tasks:
     - name: Install Nginx
       package:
@@ -640,146 +670,21 @@ How can I help you today?`,
       systemd:
         name: nginx
         state: started
-        enabled: yes
-        
-    - name: Create custom nginx config
-      template:
-        src: nginx.conf.j2
-        dest: /etc/nginx/sites-available/{{ server_name }}
-        backup: yes
-      notify: restart nginx
-      
-    - name: Enable site
-      file:
-        src: /etc/nginx/sites-available/{{ server_name }}
-        dest: /etc/nginx/sites-enabled/{{ server_name }}
-        state: link
-      notify: restart nginx
-        
-  handlers:
-    - name: restart nginx
-      systemd:
-        name: nginx
-        state: restarted`,
-          contentType: 'ansible_playbook',
-          language: 'yaml',
-          timestamp: new Date()
-        };
-        break;
+        enabled: yes`;
 
-      case 'markdown':
-        demoMessage = {
-          id: `demo-markdown-${Date.now()}`,
-          role: 'assistant',
-          content: `# Network Troubleshooting Guide
-
-## Overview
-This guide covers common network troubleshooting steps for enterprise environments.
-
-## Quick Diagnostics
-
-### 1. Connectivity Tests
-\`\`\`bash
-# Basic ping test
-ping -c 4 8.8.8.8
-
-# Trace route to destination
-traceroute google.com
-
-# Check DNS resolution
-nslookup example.com
-\`\`\`
-
-### 2. Interface Status
-\`\`\`bash
-# Check interface status
-ip link show
-
-# View IP configuration
-ip addr show
-
-# Check routing table
-ip route show
-\`\`\`
-
-## Common Issues
-
-| Issue | Symptoms | Solution |
-|-------|----------|----------|
-| DNS Resolution | Can ping IPs but not domains | Check \`/etc/resolv.conf\` |
-| Slow Connection | High latency, packet loss | Check bandwidth usage |
-| No Internet | Local network OK, no external access | Check default gateway |
-
-> **Note**: Always check physical connections first before diving into software troubleshooting.`,
-          contentType: 'markdown',
-          timestamp: new Date()
-        };
-        break;
-
-      case 'code':
-        demoMessage = {
-          id: `demo-code-${Date.now()}`,
-          role: 'assistant',
-          content: `#!/usr/bin/env python3
-"""
-Network Device Monitor
-Monitors network devices and sends alerts for issues.
-"""
-
-import subprocess
-import time
-from datetime import datetime
-
-class NetworkMonitor:
-    def __init__(self, devices):
-        self.devices = devices
-        self.failed_devices = set()
-        
-    def ping_device(self, ip):
-        """Ping a device and return True if reachable"""
-        try:
-            result = subprocess.run(
-                ['ping', '-c', '1', '-W', '1', ip],
-                capture_output=True,
-                text=True
-            )
-            return result.returncode == 0
-        except Exception as e:
-            print(f"Error pinging {ip}: {e}")
-            return False
-            
-    def monitor_loop(self, interval=60):
-        """Main monitoring loop"""
-        print("Starting network monitoring...")
-        
-        while True:
-            for device in self.devices:
-                if self.ping_device(device):
-                    if device in self.failed_devices:
-                        print(f"✅ {device} is back online")
-                        self.failed_devices.remove(device)
-                else:
-                    if device not in self.failed_devices:
-                        print(f"❌ {device} is unreachable")
-                        self.failed_devices.add(device)
-                        
-            time.sleep(interval)
-
-if __name__ == "__main__":
-    devices = ["192.168.1.1", "192.168.1.10", "8.8.8.8"]
-    monitor = NetworkMonitor(devices)
-    monitor.monitor_loop(interval=30)`,
-          contentType: 'code',
-          language: 'python',
-          timestamp: new Date()
-        };
-        break;
-    }
+    const playbookMessage: Message = {
+      id: `ansible-playbook-${Date.now()}`,
+      role: 'assistant',
+      content: playbookContent,
+      contentType: 'ansible_playbook',
+      language: 'yaml',
+      timestamp: new Date()
+    };
 
     setChatSessions(prev =>
       prev.map(session =>
         session.id === activeChatSession
-          ? { ...session, messages: [...session.messages, demoMessage] }
+          ? { ...session, messages: [...session.messages, playbookMessage] }
           : session
       )
     );
@@ -838,13 +743,18 @@ if __name__ == "__main__":
         {/* Header */}
         <div className={`flex items-center justify-between p-3 border-b ${theme === 'light' ? 'border-gray-200' : 'border-white/10'}`}>
           <div className="flex items-center gap-2">
-            <div className="w-6 h-6 bg-gradient-to-br from-blue-500 to-purple-600 rounded-lg flex items-center justify-center">
-              <Network className="w-3 h-3 text-white" />
-            </div>
+            <img 
+              src="/wizard-logo.png" 
+              alt="Netwiz Logo" 
+              className="w-6 h-6 object-contain"
+            />
             <div>
-              <h2 className={`font-semibold text-xs ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>Network Control</h2>
+              <h2 className={`font-semibold text-xs ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>
+                <span className="text-purple-500 font-bold">net</span>
+                <span className="text-blue-500 font-bold">wiz</span>
+              </h2>
               <p className={`text-xs ${theme === 'light' ? 'text-gray-600' : 'text-gray-400'}`}>
-                {focusedNode ? `Focused: ${focusedNode.label}` : 'Network Overview'}
+                {focusedNode ? `Focused: ${focusedNode.label}` : 'Network Control'}
               </p>
             </div>
           </div>
@@ -1193,41 +1103,6 @@ if __name__ == "__main__":
                     <div ref={messagesEndRef} />
                   </div>
 
-                  {/* Demo buttons */}
-                  <div className={`p-2 border-t ${theme === 'light' ? 'border-gray-200' : 'border-white/10'}`}>
-                    <div className="text-xs mb-2 text-center opacity-75">Rich Content Demos:</div>
-                    <div className="grid grid-cols-4 gap-1">
-                      <button
-                        onClick={() => addDemoContent('ssh')}
-                        className={`flex items-center justify-center p-1 rounded text-xs ${theme === 'light' ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        title="SSH Session Demo"
-                      >
-                        <Terminal className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => addDemoContent('ansible')}
-                        className={`flex items-center justify-center p-1 rounded text-xs ${theme === 'light' ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        title="Ansible Playbook Demo"
-                      >
-                        <Play className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => addDemoContent('markdown')}
-                        className={`flex items-center justify-center p-1 rounded text-xs ${theme === 'light' ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        title="Markdown Documentation Demo"
-                      >
-                        <FileText className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={() => addDemoContent('code')}
-                        className={`flex items-center justify-center p-1 rounded text-xs ${theme === 'light' ? 'bg-gray-100 hover:bg-gray-200' : 'bg-gray-700 hover:bg-gray-600'}`}
-                        title="Python Code Demo"
-                      >
-                        <Code className="w-3 h-3" />
-                      </button>
-                    </div>
-                  </div>
-
                   {/* Input */}
                   <div className={`p-3 border-t ${
                     theme === 'light' ? 'border-gray-200' : 'border-white/10'
@@ -1281,6 +1156,18 @@ if __name__ == "__main__":
                         ) : (
                           <Send className="w-3 h-3" />
                         )}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={createAnsiblePlaybookForNginx}
+                        className={`p-2 rounded transition-colors text-xs ${
+                          theme === 'light'
+                            ? 'bg-gray-200 hover:bg-gray-300'
+                            : 'bg-gray-700 hover:bg-gray-600'
+                        }`}
+                        title="Create Nginx Ansible Playbook"
+                      >
+                        <Play className="w-3 h-3" />
                       </button>
                     </form>
                   </div>

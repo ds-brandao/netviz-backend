@@ -138,3 +138,7 @@ The API documentation is available at http://localhost:3001/docs when the server
 - `requirements.txt` - Python dependencies
 - `docker-compose.yml` - PostgreSQL setup
 - `.env.example` - Environment variables template
+
+
+
+I hope nobody ever uses this code blindly. It's pretty awful. But we're on the right track.
