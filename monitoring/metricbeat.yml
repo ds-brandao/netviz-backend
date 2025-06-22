@@ -1,0 +1,164 @@
+######################## Metricbeat Configuration ############################
+
+# ========================== Modules Configuration ============================
+
+metricbeat.config.modules:
+  # Glob pattern for module configs
+  path: ${path.config}/modules.d/*.yml
+  
+  # Reload module configs as they change
+  reload.enabled: true
+  reload.period: 10s
+
+# ==================== Metricbeat Specific Configuration ======================
+
+# System module - monitors host metrics
+metricbeat.modules:
+- module: system
+  metricsets:
+    - cpu             # CPU usage
+    - load            # CPU load averages
+    - memory          # Memory usage
+    - network         # Network IO
+    - process         # Per process metrics
+    - process_summary # Process summary
+    - socket_summary  # Socket summary
+    - filesystem      # File system usage
+    - fsstat         # File system summary
+    - uptime         # System uptime
+  enabled: true
+  period: 10s
+  processes: ['.*']
+  
+  # Configure the metric types to include
+  cpu.metrics:  ["percentages", "normalized_percentages"]
+  core.metrics: ["percentages"]
+
+# Docker module - monitors Docker containers
+- module: docker
+  metricsets:
+    - container
+    - cpu
+    - diskio
+    - event
+    - healthcheck
+    - info
+    - memory
+    - network
+    - network_summary
+  hosts: ["unix:///var/run/docker.sock"]
+  period: 10s
+  enabled: true
+  
+  # Add labels and environment variables as tags
+  labels.dedot: true
+  
+  # Skip major/minor stats for performance
+  cpu.cores: false
+
+# Optional: Docker Swarm monitoring (if using Swarm)
+#- module: docker
+#  metricsets:
+#    - swarm
+#  hosts: ["unix:///var/run/docker.sock"]
+#  period: 10s
+#  enabled: true
+
+# ================================= Processors =================================
+
+processors:
+  # Add host metadata
+  - add_host_metadata:
+      when.not.contains.tags: forwarded
+      
+  # Add Docker metadata
+  - add_docker_metadata:
+      host: "unix:///var/run/docker.sock"
+      match_fields: ["system.process.cgroup.id"]
+      match_pids: ["process.pid", "process.ppid"]
+      match_source: true
+      match_source_index: 4
+      match_short_id: true
+      cleanup_timeout: 60
+      labels.dedot: true
+      
+  # Add cloud metadata (if running in cloud)
+  - add_cloud_metadata: ~
+  
+  # Drop events with no changes (reduce data volume)
+  - drop_event:
+      when:
+        or:
+          - equals:
+              docker.container.status: "paused"
+          - equals:
+              docker.container.status: "exited"
+
+# ================================== Output ====================================
+
+# Output to OpenSearch
+output.elasticsearch:
+  # OpenSearch endpoint - matching your Fluent Bit config
+  hosts: ["https://192.168.0.132:9200"]
+  
+  # Authentication
+  username: "admin"
+  password: "xuwzuc-rExzo3-hotjed"
+  
+  # SSL/TLS configuration
+  ssl.verification_mode: "none"
+  ssl.enabled: true
+  
+  # Index settings
+  index: "metricbeat-%{[agent.version]}-%{+yyyy.MM.dd}"
+  
+  # Template settings
+  template.name: "metricbeat"
+  template.pattern: "metricbeat-*"
+  template.enabled: true
+  template.settings:
+    index.number_of_shards: 1
+    index.number_of_replicas: 0
+    index.codec: best_compression
+    
+  # Performance tuning
+  bulk_max_size: 50
+  worker: 1
+
+# ================================= Dashboards =================================
+
+# Enable dashboards (optional)
+setup.dashboards.enabled: false
+#setup.dashboards.url: "https://192.168.0.132:5601"
+
+# =================================== Kibana ===================================
+
+# Kibana/OpenSearch Dashboards endpoint (optional)
+setup.kibana:
+  host: "https://192.168.0.132:5601"
+  ssl.verification_mode: "none"
+  username: "admin"
+  password: "xuwzuc-rExzo3-hotjed"
+
+# ================================== Logging ===================================
+
+logging.level: info
+logging.to_files: true
+logging.files:
+  path: /var/log/metricbeat
+  name: metricbeat
+  keepfiles: 7
+  permissions: 0644
+  
+# Log only specific selectors
+logging.selectors: ["*"]
+
+# ============================= X-Pack Monitoring ==============================
+
+# Disable X-Pack monitoring (not needed for OpenSearch)
+monitoring.enabled: false
+
+# ================================= Migration ==================================
+
+# For compatibility with OpenSearch
+migration.6_to_7.enabled: true 
