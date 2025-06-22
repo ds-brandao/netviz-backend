@@ -1,0 +1,57 @@
+version: '3.7'
+
+services:
+  metricbeat:
+    image: docker.elastic.co/beats/metricbeat:7.17.15
+    container_name: metricbeat
+    user: root # Required to access docker.sock
+    hostname: metricbeat
+    restart: unless-stopped
+    
+    # Network mode host for better system metrics
+    network_mode: host
+    
+    # Required capabilities for monitoring
+    cap_add:
+      - SYS_PTRACE
+      - DAC_READ_SEARCH
+      
+    # Environment variables
+    environment:
+      - ELASTIC_USERNAME=admin
+      - ELASTIC_PASSWORD=xuwzuc-rExzo3-hotjed
+      
+    volumes:
+      # Metricbeat configuration
+      - ./metricbeat.yml:/usr/share/metricbeat/metricbeat.yml:ro
+      
+      # Docker socket for container monitoring
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      
+      # System directories for monitoring
+      - /sys/fs/cgroup:/hostfs/sys/fs/cgroup:ro
+      - /proc:/hostfs/proc:ro
+      - /:/hostfs:ro
+      
+      # Persist registry and data
+      - metricbeat-data:/usr/share/metricbeat/data
+      - /var/log/metricbeat:/var/log/metricbeat
+      
+    command: [
+      "metricbeat",
+      "-e",
+      "-system.hostfs=/hostfs",
+      "-strict.perms=false"
+    ]
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "metricbeat", "test", "config"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  metricbeat-data:
+    driver: local 
