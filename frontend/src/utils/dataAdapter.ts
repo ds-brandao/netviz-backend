@@ -57,8 +57,8 @@ export function adaptBackendNode(backendNode: BackendNetworkNode): NetworkNode {
       location: filteredMetadata.location as string || undefined,
       ports: filteredMetadata.ports as number || undefined,
       uptime: filteredMetadata.uptime as string || undefined,
-      cpu: filteredMetadata.cpu as number || undefined,
-      memory: filteredMetadata.memory as number || undefined,
+      cpu: (filteredMetadata.cpu_usage as number) || (filteredMetadata.cpu as number) || undefined,
+      memory: (filteredMetadata.memory_usage as number) || (filteredMetadata.memory as number) || undefined,
       // Include any additional metadata fields
       ...Object.fromEntries(
         Object.entries(filteredMetadata).filter(([key]) => 

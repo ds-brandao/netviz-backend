@@ -11,7 +11,9 @@ export const useNetworkLayout = () => {
   ): Node[] => {
     switch (layout) {
       case 'hierarchical':
-        return applyHierarchicalLayout(nodes, edges);
+        return applyHierarchicalLayout(nodes, edges, 'TB');
+      case 'hierarchical-horizontal':
+        return applyHierarchicalLayout(nodes, edges, 'LR');
       case 'circular':
         return applyCircularLayout(nodes);
       case 'grid':
@@ -25,13 +27,15 @@ export const useNetworkLayout = () => {
   return { applyLayout };
 };
 
-const applyHierarchicalLayout = (nodes: NetworkNode[], edges: NetworkEdge[]): Node[] => {
+const applyHierarchicalLayout = (nodes: NetworkNode[], edges: NetworkEdge[], direction: 'TB' | 'LR' = 'TB'): Node[] => {
   const dagreGraph = new dagre.graphlib.Graph();
   dagreGraph.setDefaultEdgeLabel(() => ({}));
+  
+  const isHorizontal = direction === 'LR';
   dagreGraph.setGraph({ 
-    rankdir: 'TB', 
-    ranksep: 150, 
-    nodesep: 120,
+    rankdir: direction, 
+    ranksep: isHorizontal ? 200 : 150, 
+    nodesep: isHorizontal ? 100 : 120,
     marginx: 50,
     marginy: 50
   });
@@ -48,6 +52,8 @@ const applyHierarchicalLayout = (nodes: NetworkNode[], edges: NetworkEdge[]): No
 
   return nodes.map(node => {
     const nodeWithPosition = dagreGraph.node(node.id);
+    const isHorizontal = direction === 'LR';
+    
     return {
       id: node.id,
       type: 'networkNode',
@@ -56,8 +62,8 @@ const applyHierarchicalLayout = (nodes: NetworkNode[], edges: NetworkEdge[]): No
         y: nodeWithPosition.y - 70,
       },
       data: node,
-      targetPosition: Position.Top,
-      sourcePosition: Position.Bottom,
+      targetPosition: isHorizontal ? Position.Left : Position.Top,
+      sourcePosition: isHorizontal ? Position.Right : Position.Bottom,
     };
   });
 };

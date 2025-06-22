@@ -8,6 +8,10 @@ import os
 from database import get_db_session, NetworkNode
 from sqlalchemy import select
 from datetime import datetime
+import requests
+
+# Backend API configuration for AI tools
+BACKEND_API_BASE = "http://localhost:3001"
 
 @tool
 async def get_network_status(node_name: str = None) -> dict:
@@ -311,3 +315,239 @@ async def run_ansible_playbook(playbook_content: str, inventory: str = "localhos
             "error": str(e),
             "playbook_summary": "Failed to execute playbook"
         } 
+
+@tool
+async def get_recent_logs(device_name: Optional[str] = None, time_range: int = 2, log_level: Optional[str] = None) -> str:
+    """Get recent logs from OpenSearch using the AI query endpoint"""
+    try:
+        # Use the AI query logs endpoint we created
+        url = f"{BACKEND_API_BASE}/ai/query-logs"
+        
+        payload = {
+            "time_range": time_range,
+            "size": 20
+        }
+        
+        if device_name:
+            payload["device_name"] = device_name
+        
+        if log_level:
+            payload["log_level"] = log_level.upper()
+        
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code != 200:
+            return f"Failed to fetch logs: {response.status_code} - {response.text}"
+        
+        data = response.json()
+        logs = data.get("logs", [])
+        
+        if not logs:
+            filter_desc = f"last {time_range} hours"
+            if device_name:
+                filter_desc += f" for device {device_name}"
+            if log_level:
+                filter_desc += f" with level {log_level}"
+            return f"No logs found for {filter_desc}"
+        
+        # Format logs for display
+        log_summary = f"**Recent Logs** ({len(logs)} entries"
+        if device_name:
+            log_summary += f" for **{device_name}**"
+        log_summary += f", last {time_range} hours):\n\n"
+        
+        for log in logs[:15]:  # Show first 15 logs
+            timestamp = log.get('timestamp', 'Unknown time')
+            level = log.get('level', 'INFO')
+            message = log.get('message', 'No message')
+            event_type = log.get('event_type', 'unknown')
+            node = log.get('node_id', 'unknown')
+            
+            # Format timestamp more readable
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                time_str = dt.strftime('%H:%M:%S')
+            except:
+                time_str = timestamp
+            
+            service = log.get('service', node)
+            log_summary += f"`{time_str}` **{level}** [{service}]: {message}\n"
+            
+        
+        if len(logs) > 10:
+            log_summary += f"... and {len(logs) - 10} more entries\n"
+        
+        return log_summary
+        
+    except Exception as e:
+        return f"Error fetching logs: {str(e)}"
+
+@tool  
+async def get_device_info(device_id: str) -> str:
+    """Get comprehensive device information including recent logs and metrics"""
+    try:
+        url = f"{BACKEND_API_BASE}/ai/device-info/{device_id}"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return f"Failed to get device info: {response.status_code} - {response.text}"
+        
+        data = response.json()
+        device = data.get("device", {})
+        metrics = data.get("metrics", {})
+        recent_logs = data.get("recent_logs", [])
+        
+        # Format comprehensive device report
+        report = f"# **{device.get('name', device_id)} Device Report**\n\n"
+        
+        # Device Status
+        report += f"**Status**: {device.get('status', 'Unknown')}\n"
+        report += f"**Type**: {device.get('type', 'Unknown')}\n"
+        report += f"**Layer**: {device.get('layer', 'Unknown')}\n"
+        if device.get('ip_address'):
+            report += f"**IP Address**: {device['ip_address']}\n"
+        if device.get('last_updated'):
+            report += f"**Last Updated**: {device['last_updated']}\n"
+        
+        report += "\n"
+        
+        # Metrics
+        if metrics:
+            report += "## **Current Metrics**\n"
+            for host, data in metrics.items():
+                if data.get('system'):
+                    sys = data['system']
+                    if sys.get('cpu', {}).get('usage_percent'):
+                        report += f"- **CPU Usage**: {sys['cpu']['usage_percent']:.1f}%\n"
+                    if sys.get('memory', {}).get('usage_percent'):
+                        report += f"- **Memory Usage**: {sys['memory']['usage_percent']:.1f}%\n"
+                    if sys.get('load', {}).get('1m'):
+                        report += f"- **Load Average**: {sys['load']['1m']}\n"
+        
+        # Recent Activity
+        if recent_logs:
+            report += f"\n## **Recent Activity** ({len(recent_logs)} logs)\n"
+            for log in recent_logs[:5]:
+                timestamp = log.get('timestamp', '')
+                try:
+                    from datetime import datetime
+                    dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+                    time_str = dt.strftime('%H:%M:%S')
+                except:
+                    time_str = timestamp
+                
+                level = log.get('level', 'INFO')
+                message = log.get('message', 'No message')
+                report += f"- `{time_str}` **{level}**: {message[:100]}{'...' if len(message) > 100 else ''}\n"
+        
+        return report
+        
+    except Exception as e:
+        return f"Error getting device info: {str(e)}"
+
+@tool
+async def get_error_logs(hours: int = 24) -> str:
+    """Get error and warning logs from the last N hours"""
+    try:
+        url = f"{OPENSEARCH_BASE_URL.replace('http://localhost:9200', 'http://localhost:3001')}/logs/errors?hours={hours}&size=50"
+        response = requests.get(url, timeout=10)
+        
+        if response.status_code != 200:
+            return f"Failed to fetch error logs: {response.status_code}"
+        
+        logs = response.json()
+        
+        if not logs:
+            return f"No error or warning logs found in the last {hours} hours"
+        
+        # Group by level
+        errors = [log for log in logs if log.get('level') == 'ERROR']
+        warnings = [log for log in logs if log.get('level') == 'WARN']
+        
+        summary = f"Error and Warning Logs (last {hours} hours):\n\n"
+        summary += f"Found {len(errors)} errors and {len(warnings)} warnings\n\n"
+        
+        if errors:
+            summary += "ERRORS:\n"
+            for log in errors[:5]:  # Show first 5 errors
+                timestamp = log.get('timestamp', 'Unknown time')
+                message = log.get('message', 'No message')
+                node = log.get('node_id', 'unknown')
+                event_type = log.get('event_type', 'unknown')
+                
+                summary += f"  [{timestamp}] {node} - {event_type}\n"
+                summary += f"    {message}\n"
+                
+                # Add error details
+                metadata = log.get('metadata', {})
+                if 'error_code' in metadata:
+                    summary += f"    Error Code: {metadata['error_code']}\n"
+                if 'retry_count' in metadata:
+                    summary += f"    Retry Count: {metadata['retry_count']}\n"
+                summary += "\n"
+        
+        if warnings:
+            summary += "WARNINGS:\n"
+            for log in warnings[:5]:  # Show first 5 warnings
+                timestamp = log.get('timestamp', 'Unknown time')
+                message = log.get('message', 'No message')
+                node = log.get('node_id', 'unknown')
+                event_type = log.get('event_type', 'unknown')
+                
+                summary += f"  [{timestamp}] {node} - {event_type}\n"
+                summary += f"    {message}\n"
+                
+                # Add warning details
+                metadata = log.get('metadata', {})
+                if 'cpu_usage' in metadata:
+                    summary += f"    CPU Usage: {metadata['cpu_usage']}%\n"
+                if 'memory_usage' in metadata:
+                    summary += f"    Memory Usage: {metadata['memory_usage']}%\n"
+                if 'alert_level' in metadata:
+                    summary += f"    Alert Level: {metadata['alert_level']}\n"
+                summary += "\n"
+        
+        return summary
+        
+    except Exception as e:
+        return f"Error fetching error logs: {str(e)}"
+
+@tool
+async def search_logs(search_term: str, size: int = 20) -> str:
+    """Search logs for specific terms or patterns"""
+    try:
+        url = f"{OPENSEARCH_BASE_URL.replace('http://localhost:9200', 'http://localhost:3001')}/logs"
+        params = {"search": search_term, "size": size}
+        
+        search_params = "&".join([f"{k}={v}" for k, v in params.items()])
+        response = requests.get(f"{url}?{search_params}", timeout=10)
+        
+        if response.status_code != 200:
+            return f"Failed to search logs: {response.status_code}"
+        
+        logs = response.json()
+        
+        if not logs:
+            return f"No logs found matching '{search_term}'"
+        
+        summary = f"Search Results for '{search_term}' ({len(logs)} matches):\n\n"
+        
+        for log in logs[:10]:  # Show first 10 results
+            timestamp = log.get('timestamp', 'Unknown time')
+            level = log.get('level', 'INFO')
+            message = log.get('message', 'No message')
+            node = log.get('node_id', 'unknown')
+            event_type = log.get('event_type', 'unknown')
+            
+            summary += f"[{timestamp}] {level} - {node}\n"
+            summary += f"  Event: {event_type}\n"
+            summary += f"  Message: {message}\n\n"
+        
+        if len(logs) > 10:
+            summary += f"... and {len(logs) - 10} more matches\n"
+        
+        return summary
+        
+    except Exception as e:
+        return f"Error searching logs: {str(e)}" 

@@ -91,7 +91,20 @@ export const NetworkEdge: React.FC<NetworkEdgeProps> = ({
           >
             <div className="text-center">
               {data.bandwidth && (
-                <div className="text-blue-300">{data.bandwidth}</div>
+                <div className="text-blue-300 leading-tight">
+                  {data.bandwidth.includes('(') ? (
+                    <>
+                      <div className="text-xs text-gray-300">
+                        {data.bandwidth.split(' (')[0]}
+                      </div>
+                      <div>
+                        ({data.bandwidth.split(' (')[1]}
+                      </div>
+                    </>
+                  ) : (
+                    data.bandwidth
+                  )}
+                </div>
               )}
               {data.utilization !== undefined && (
                 <div className={`text-xs ${

@@ -13,3 +13,4 @@ ansible
 sse-starlette
 websockets
 aiohttp
+requests

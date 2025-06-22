@@ -6,6 +6,8 @@ import {
   Shield, 
   Server, 
   Monitor,
+  Laptop,
+  HardDrive,
   AlertTriangle,
   CheckCircle,
   XCircle,
@@ -32,6 +34,10 @@ const getNodeIcon = (type: NetworkNodeType['type']) => {
       return Server;
     case 'endpoint':
       return Monitor;
+    case 'client':
+      return Laptop;
+    case 'host':
+      return HardDrive;
     default:
       return Network;
   }

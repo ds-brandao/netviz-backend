@@ -5,6 +5,7 @@ import { vscDarkPlus, vs } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { SimpleLiquidGlass } from './SimpleLiquidGlass/SimpleLiquidGlass';
 import { useTheme } from '../contexts/ThemeContext';
 import { useDataMode } from '../contexts/DataModeContext';
+import LogsPanel from './LogsPanel';
 import { 
   Settings, 
   MessageSquare, 
@@ -22,12 +23,9 @@ import {
   Wifi,
   Info,
   Layout,
-  Layers,
   Search,
   RotateCcw,
   Zap,
-  Eye,
-  EyeOff,
   Terminal,
   Code,
   FileText,
@@ -238,7 +236,7 @@ export const EnhancedCombinedControlPanel: React.FC<EnhancedCombinedControlPanel
     return <div className="whitespace-pre-wrap">{message.content}</div>;
   };
 
-  const [activeTab, setActiveTab] = useState<'overview' | 'controls' | 'info' | 'chat'>('controls');
+  const [activeTab, setActiveTab] = useState<'overview' | 'controls' | 'logs' | 'info' | 'chat'>('controls');
   const [isExpanded, setIsExpanded] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
   
@@ -422,6 +420,7 @@ export const EnhancedCombinedControlPanel: React.FC<EnhancedCombinedControlPanel
         message: message.trim(),
         session_id: activeChatSession,
         context: focusedNode ? {
+          focused_device: focusedNode.id,
           focused_node: {
             id: focusedNode.id,
             label: focusedNode.label,
@@ -552,7 +551,30 @@ export const EnhancedCombinedControlPanel: React.FC<EnhancedCombinedControlPanel
         {
           id: '1',
           role: 'assistant',
-          content: "Hello! I'm your network infrastructure assistant. How can I help you today?",
+          content: `Hello! I'm your network infrastructure assistant with **real-time access** to live network data. I can help you with:
+
+🔍 **Log Analysis** (using live OpenSearch data):
+• Get recent logs from any device
+• Search for specific errors or patterns  
+• Filter by log level (ERROR, WARN, INFO)
+
+📊 **Device Monitoring** (using live MetricBeat data):
+• Check device status and health metrics
+• View CPU, memory, and system performance
+• Get comprehensive device reports
+
+🔧 **Network Automation**:
+• Create and execute Ansible playbooks
+• Run SSH commands on remote devices
+• Automate network management tasks
+
+💬 **I use real tools** - no simulated data! Try asking:
+• "Get logs for switch2"
+• "Show me device info for frr-router"  
+• "Create an ansible playbook for nginx"
+• "What are the recent errors?"
+
+How can I help you today?`,
           timestamp: new Date()
         }
       ],
@@ -783,29 +805,17 @@ if __name__ == "__main__":
   // Layout and layer configurations
   const layouts: { key: LayoutMode; label: string; icon: React.ReactNode }[] = [
     { key: 'force', label: 'Force Directed', icon: <Zap className="w-4 h-4" /> },
-    { key: 'hierarchical', label: 'Hierarchical', icon: <Layout className="w-4 h-4" /> },
+    { key: 'hierarchical', label: 'Vertical', icon: <Layout className="w-4 h-4" /> },
+    { key: 'hierarchical-horizontal', label: 'Horizontal', icon: <Layout className="w-4 h-4 rotate-90" /> },
     { key: 'circular', label: 'Circular', icon: <RotateCcw className="w-4 h-4" /> },
     { key: 'grid', label: 'Grid', icon: <Settings className="w-4 h-4" /> }
   ];
 
-  const layers: { key: FilterLayer; label: string; color: string }[] = [
-    { key: 'physical', label: 'Physical', color: 'bg-red-500' },
-    { key: 'datalink', label: 'Data Link', color: 'bg-orange-500' },
-    { key: 'network', label: 'Network', color: 'bg-yellow-500' },
-    { key: 'transport', label: 'Transport', color: 'bg-green-500' },
-    { key: 'application', label: 'Application', color: 'bg-blue-500' }
-  ];
-
-  const toggleLayer = (layer: FilterLayer) => {
-    const newLayers = activeLayers.includes(layer)
-      ? activeLayers.filter(l => l !== layer)
-      : [...activeLayers, layer];
-    onFilterChange(newLayers);
-  };
 
   const tabs = [
     { key: 'overview' as const, label: 'Overview', icon: Activity },
     { key: 'controls' as const, label: 'Controls', icon: Settings },
+    { key: 'logs' as const, label: 'Logs', icon: FileText },
     { key: 'info' as const, label: 'Node Info', icon: Info, disabled: !focusedNode },
     { key: 'chat' as const, label: 'AI Assistant', icon: MessageSquare }
   ];
@@ -814,8 +824,9 @@ if __name__ == "__main__":
 
   // Determine panel size based on active tab
   const isAIChatActive = activeTab === 'chat';
-  const panelWidth = isAIChatActive ? 'w-[500px]' : 'w-80';
-  const maxHeight = isAIChatActive ? 'max-h-[600px]' : 'max-h-[80vh]';
+  const isLogsActive = activeTab === 'logs';
+  const panelWidth = isAIChatActive ? 'w-[500px]' : isLogsActive ? 'w-[600px]' : 'w-80';
+  const maxHeight = isAIChatActive ? 'max-h-[90vh]' : isLogsActive ? 'max-h-[70vh]' : 'max-h-[80vh]';
 
   // Regular panel with expandable AI chat
   return (
@@ -960,6 +971,15 @@ if __name__ == "__main__":
                 </div>
               )}
 
+              {activeTab === 'logs' && (
+                <div className="h-96 overflow-hidden">
+                  <LogsPanel 
+                    className="h-full border-0 bg-transparent" 
+                    focusedNodeId={focusedNode?.id}
+                  />
+                </div>
+              )}
+
               {activeTab === 'controls' && (
                 <div className="p-3 space-y-4 max-h-96 overflow-y-auto">
                   {/* Search */}
@@ -1004,43 +1024,6 @@ if __name__ == "__main__":
                     </div>
                   </div>
 
-                  {/* Layer Filters */}
-                  <div>
-                    <h3 className={`font-medium text-sm mb-2 flex items-center gap-2 ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>
-                      <Layers className="w-4 h-4 text-purple-400" />
-                      Network Layers
-                    </h3>
-                    <div className="space-y-2">
-                      {layers.map(layer => {
-                        const isActive = activeLayers.includes(layer.key);
-                        return (
-                          <button
-                            key={layer.key}
-                            onClick={() => toggleLayer(layer.key)}
-                            className={`w-full flex items-center justify-between px-3 py-2 rounded-lg transition-all border ${
-                              isActive
-                                ? theme === 'light'
-                                  ? 'bg-blue-50 border-blue-300 shadow-sm'
-                                  : 'bg-white/15 border border-white/30'
-                                : theme === 'light'
-                                ? 'bg-gray-50 hover:bg-gray-100 border-gray-200 hover:border-gray-300'
-                                : 'bg-white/5 hover:bg-white/10 border-white/10'
-                            }`}
-                          >
-                            <div className="flex items-center gap-2">
-                              <div className={`w-3 h-3 rounded-full ${layer.color}`} />
-                              <span className={`text-sm ${theme === 'light' ? 'text-gray-900' : 'text-white'}`}>{layer.label}</span>
-                            </div>
-                            {isActive ? (
-                              <Eye className="w-4 h-4 text-green-500" />
-                            ) : (
-                              <EyeOff className={`w-4 h-4 ${theme === 'light' ? 'text-gray-400' : 'text-gray-500'}`} />
-                            )}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
 
                   {/* Reset Button */}
                   <button
@@ -1090,7 +1073,7 @@ if __name__ == "__main__":
               )}
 
               {activeTab === 'chat' && (
-                <div className="flex flex-col h-[500px]">
+                <div className="flex flex-col h-[70vh] min-h-[500px]">
                   {/* Chat Sessions Tabs */}
                   <div className={`flex overflow-x-auto border-b ${theme === 'light' ? 'border-gray-200' : 'border-white/10'} p-2`}>
                     {chatSessions.map(session => (

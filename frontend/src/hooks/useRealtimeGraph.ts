@@ -185,6 +185,19 @@ export function useRealtimeGraph(sessionId: string = 'default'): [RealtimeGraphS
     connect();
   }, [connect]);
 
+  // 5-second sync updates
+  useEffect(() => {
+    if (!state.isConnected) return;
+
+    const interval = setInterval(() => {
+      if (wsManagerRef.current && state.isConnected) {
+        wsManagerRef.current.requestGraphState();
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [state.isConnected]);
+
   const actions: RealtimeGraphActions = {
     connect,
     disconnect,

@@ -27,6 +27,34 @@ export interface BackendNetworkEdge {
   last_updated: string;
 }
 
+export interface LogEntry {
+  id: string;
+  timestamp: string;
+  level: 'INFO' | 'WARN' | 'ERROR';
+  service: string;
+  message: string;
+  node_id: string;
+  event_type: string;
+  metadata: Record<string, unknown>;
+}
+
+export interface LogQuery {
+  level?: string[];
+  event_type?: string;
+  node_id?: string;
+  service?: string;
+  time_range?: string;
+  size?: number;
+  search_term?: string;
+}
+
+export interface LogStats {
+  total_logs: number;
+  level_counts: Record<string, number>;
+  opensearch_available: boolean;
+  error?: string;
+}
+
 export interface GraphState {
   nodes: BackendNetworkNode[];
   edges: BackendNetworkEdge[];
@@ -440,5 +468,77 @@ export class ApiService {
     } finally {
       reader.releaseLock();
     }
+  }
+
+  // Log API methods
+  static async fetchLogs(params?: {
+    level?: string;
+    event_type?: string;
+    node_id?: string;
+    service?: string;
+    time_range?: string;
+    size?: number;
+    search?: string;
+  }): Promise<LogEntry[]> {
+    const searchParams = new URLSearchParams();
+    if (params) {
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined) {
+          searchParams.append(key, value.toString());
+        }
+      });
+    }
+
+    const response = await fetch(`${API_BASE_URL}/logs?${searchParams}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch logs');
+    }
+    return response.json();
+  }
+
+  static async fetchRecentLogs(minutes: number = 30, size: number = 50): Promise<LogEntry[]> {
+    const response = await fetch(`${API_BASE_URL}/logs/recent?minutes=${minutes}&size=${size}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch recent logs');
+    }
+    return response.json();
+  }
+
+  static async fetchErrorLogs(hours: number = 24, size: number = 100): Promise<LogEntry[]> {
+    const response = await fetch(`${API_BASE_URL}/logs/errors?hours=${hours}&size=${size}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch error logs');
+    }
+    return response.json();
+  }
+
+  static async fetchNodeLogs(nodeId: string, hours: number = 24, size: number = 50): Promise<LogEntry[]> {
+    const response = await fetch(`${API_BASE_URL}/logs/node/${nodeId}?hours=${hours}&size=${size}`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch node logs');
+    }
+    return response.json();
+  }
+
+  static async searchLogs(query: LogQuery): Promise<LogEntry[]> {
+    const response = await fetch(`${API_BASE_URL}/logs/search`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(query),
+    });
+    if (!response.ok) {
+      throw new Error('Failed to search logs');
+    }
+    return response.json();
+  }
+
+  static async fetchLogStats(): Promise<LogStats> {
+    const response = await fetch(`${API_BASE_URL}/logs/stats`);
+    if (!response.ok) {
+      throw new Error('Failed to fetch log stats');
+    }
+    return response.json();
   }
 } 

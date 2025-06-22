@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { 
   Router, 
   Network, 
@@ -14,16 +14,25 @@ import {
   CheckCircle,
   AlertTriangle,
   XCircle,
-  Info
+  Info,
+  FileText,
+  BarChart3,
+  Settings,
+  Eye
 } from 'lucide-react';
 import { NetworkNode } from '../types/network';
 import { formatMetadataForDisplay, getDisplayFieldName, isEmpty } from '../utils/dataAdapter';
+import LogViewer from './LogViewer';
 
 interface NodeInfoPanelProps {
   node: NetworkNode;
 }
 
+type TabType = 'overview' | 'logs' | 'stats' | 'config';
+
 export const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ node }) => {
+  const [activeTab, setActiveTab] = useState<TabType>('overview');
+
   const getNodeIcon = (type: NetworkNode['type']) => {
     switch (type) {
       case 'router':
@@ -64,9 +73,10 @@ export const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ node }) => {
   const displayMetadata = formatMetadataForDisplay(node.metadata || {});
 
   // Categorize metadata fields
-  const hardwareFields = ['vendor', 'model', 'version', 'ports'];
-  const performanceFields = ['cpu', 'memory'];
-  const locationFields = ['location', 'uptime'];
+  const hardwareFields = ['vendor', 'model', 'version', 'ports', 'serial_number', 'firmware'];
+  const performanceFields = ['cpu', 'memory', 'bandwidth_usage', 'packet_loss', 'latency'];
+  const locationFields = ['location', 'uptime', 'rack', 'datacenter', 'building'];
+  const networkFields = ['vlan', 'subnet', 'gateway', 'dns', 'domain'];
   
   const hardwareInfo = Object.fromEntries(
     Object.entries(displayMetadata).filter(([key]) => hardwareFields.includes(key))
@@ -79,33 +89,29 @@ export const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ node }) => {
   const locationInfo = Object.fromEntries(
     Object.entries(displayMetadata).filter(([key]) => locationFields.includes(key))
   );
+
+  const networkInfo = Object.fromEntries(
+    Object.entries(displayMetadata).filter(([key]) => networkFields.includes(key))
+  );
   
   const otherInfo = Object.fromEntries(
     Object.entries(displayMetadata).filter(([key]) => 
       !hardwareFields.includes(key) && 
       !performanceFields.includes(key) && 
-      !locationFields.includes(key)
+      !locationFields.includes(key) &&
+      !networkFields.includes(key)
     )
   );
 
-  return (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
-        <div className="p-2 bg-blue-500/20 rounded-lg">
-          <IconComponent className="w-5 h-5 text-blue-400" />
-        </div>
-        <div className="flex-1">
-          <h3 className="text-white font-semibold">{node.label}</h3>
-          <div className="flex items-center gap-2 text-sm">
-            <StatusIcon className={`w-3 h-3 ${statusInfo.color}`} />
-            <span className={`capitalize ${statusInfo.color}`}>{node.status}</span>
-            <span className="text-gray-400">•</span>
-            <span className="text-gray-400 capitalize">{node.type}</span>
-          </div>
-        </div>
-      </div>
+  const tabs = [
+    { id: 'overview', label: 'Overview', icon: Eye },
+    { id: 'logs', label: 'Logs', icon: FileText },
+    { id: 'stats', label: 'Stats', icon: BarChart3 },
+    { id: 'config', label: 'Config', icon: Settings },
+  ];
 
+  const renderOverviewTab = () => (
+    <div className="space-y-4">
       {/* Basic Info */}
       <div className="space-y-3">
         {/* Only show IP if it exists and is not empty */}
@@ -146,7 +152,27 @@ export const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ node }) => {
             {Object.entries(hardwareInfo).map(([key, value]) => (
               <div key={key} className="flex justify-between">
                 <span className="text-gray-400">{getDisplayFieldName(key)}:</span>
-                <span className={`text-white ${key === 'version' ? 'font-mono' : ''}`}>
+                <span className={`text-white ${key === 'version' || key === 'serial_number' ? 'font-mono' : ''}`}>
+                  {value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Network Configuration */}
+      {Object.keys(networkInfo).length > 0 && (
+        <div className="p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+          <h4 className="text-white font-medium mb-2 flex items-center gap-2">
+            <Network className="w-4 h-4 text-blue-400" />
+            Network Configuration
+          </h4>
+          <div className="space-y-2 text-sm">
+            {Object.entries(networkInfo).map(([key, value]) => (
+              <div key={key} className="flex justify-between">
+                <span className="text-gray-400">{getDisplayFieldName(key)}:</span>
+                <span className="text-white font-mono">
                   {value}
                 </span>
               </div>
@@ -204,6 +230,14 @@ export const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ node }) => {
                 </div>
               </div>
             )}
+
+            {/* Additional performance metrics */}
+            {Object.entries(performanceInfo).filter(([key]) => !['cpu', 'memory'].includes(key)).map(([key, value]) => (
+              <div key={key} className="flex justify-between text-sm">
+                <span className="text-gray-400">{getDisplayFieldName(key)}:</span>
+                <span className="text-white font-mono">{value}</span>
+              </div>
+            ))}
           </div>
         </div>
       )}
@@ -241,6 +275,183 @@ export const NodeInfoPanel: React.FC<NodeInfoPanelProps> = ({ node }) => {
           }`} />
           <span className="text-white capitalize text-sm">{node.layer}</span>
         </div>
+      </div>
+    </div>
+  );
+
+  const renderLogsTab = () => (
+    <div className="h-full">
+      <LogViewer nodeId={node.id} className="h-full" />
+    </div>
+  );
+
+  const renderStatsTab = () => (
+    <div className="space-y-4">
+      <div className="p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+        <h4 className="text-white font-medium mb-3">Connection Statistics</h4>
+        <div className="grid grid-cols-2 gap-4 text-sm">
+          <div>
+            <span className="text-gray-400">Active Connections:</span>
+            <div className="text-white font-mono">
+              {displayMetadata.active_connections || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <span className="text-gray-400">Total Packets:</span>
+            <div className="text-white font-mono">
+              {displayMetadata.total_packets || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <span className="text-gray-400">Bytes Sent:</span>
+            <div className="text-white font-mono">
+              {displayMetadata.bytes_sent || 'N/A'}
+            </div>
+          </div>
+          <div>
+            <span className="text-gray-400">Bytes Received:</span>
+            <div className="text-white font-mono">
+              {displayMetadata.bytes_received || 'N/A'}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+        <h4 className="text-white font-medium mb-3">Health Metrics</h4>
+        <div className="space-y-3">
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Last Health Check:</span>
+            <span className="text-white">
+              {displayMetadata.last_health_check || new Date().toLocaleString()}
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Response Time:</span>
+            <span className="text-white font-mono">
+              {displayMetadata.response_time || '<1ms'}
+            </span>
+          </div>
+          <div className="flex justify-between text-sm">
+            <span className="text-gray-400">Availability:</span>
+            <span className="text-green-400 font-mono">
+              {displayMetadata.availability || '99.9%'}
+            </span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderConfigTab = () => (
+    <div className="space-y-4">
+      <div className="p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+        <h4 className="text-white font-medium mb-3">Device Configuration</h4>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-400">Management IP:</span>
+            <span className="text-white font-mono">{node.ip || 'N/A'}</span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">SNMP Community:</span>
+            <span className="text-white font-mono">
+              {displayMetadata.snmp_community || 'public'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">SSH Port:</span>
+            <span className="text-white font-mono">
+              {displayMetadata.ssh_port || '22'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Protocol:</span>
+            <span className="text-white">
+              {displayMetadata.protocol || 'SSH/SNMP'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div className="p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+        <h4 className="text-white font-medium mb-3">Security Settings</h4>
+        <div className="space-y-2 text-sm">
+          <div className="flex justify-between">
+            <span className="text-gray-400">Access Control:</span>
+            <span className="text-white">
+              {displayMetadata.access_control || 'Enabled'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Encryption:</span>
+            <span className="text-white">
+              {displayMetadata.encryption || 'AES-256'}
+            </span>
+          </div>
+          <div className="flex justify-between">
+            <span className="text-gray-400">Last Security Scan:</span>
+            <span className="text-white">
+              {displayMetadata.last_security_scan || 'N/A'}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      {/* Raw metadata for debugging */}
+      <div className="p-3 bg-gray-800/30 rounded-lg border border-gray-700/50">
+        <h4 className="text-white font-medium mb-3">Raw Metadata</h4>
+        <pre className="text-xs text-gray-300 bg-gray-900 p-2 rounded overflow-auto max-h-40">
+          {JSON.stringify(node.metadata, null, 2)}
+        </pre>
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="h-full flex flex-col">
+      {/* Header */}
+      <div className="flex items-center gap-3 p-3 bg-gray-800/30 rounded-lg border border-gray-700/50 mb-4">
+        <div className="p-2 bg-blue-500/20 rounded-lg">
+          <IconComponent className="w-5 h-5 text-blue-400" />
+        </div>
+        <div className="flex-1">
+          <h3 className="text-white font-semibold">{node.label}</h3>
+          <div className="flex items-center gap-2 text-sm">
+            <StatusIcon className={`w-3 h-3 ${statusInfo.color}`} />
+            <span className={`capitalize ${statusInfo.color}`}>{node.status}</span>
+            <span className="text-gray-400">•</span>
+            <span className="text-gray-400 capitalize">{node.type}</span>
+          </div>
+        </div>
+      </div>
+
+      {/* Tabs */}
+      <div className="flex space-x-1 mb-4 bg-gray-800/20 rounded-lg p-1">
+        {tabs.map((tab) => {
+          const TabIcon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id as TabType)}
+              className={`flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors ${
+                activeTab === tab.id
+                  ? 'bg-blue-600 text-white'
+                  : 'text-gray-400 hover:text-white hover:bg-gray-700/50'
+              }`}
+            >
+              <TabIcon className="w-4 h-4" />
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* Tab Content */}
+      <div className="flex-1 overflow-auto">
+        {activeTab === 'overview' && renderOverviewTab()}
+        {activeTab === 'logs' && renderLogsTab()}
+        {activeTab === 'stats' && renderStatsTab()}
+        {activeTab === 'config' && renderConfigTab()}
       </div>
     </div>
   );

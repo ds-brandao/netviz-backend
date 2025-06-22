@@ -1,6 +1,6 @@
 export interface NetworkNode {
   id: string;
-  type: 'router' | 'switch' | 'firewall' | 'server' | 'endpoint';
+  type: 'router' | 'switch' | 'firewall' | 'server' | 'endpoint' | 'client' | 'host';
   label: string;
   ip?: string;
   status: 'online' | 'offline' | 'warning' | 'error';
@@ -39,5 +39,5 @@ export interface ChatMessage {
   };
 }
 
-export type LayoutMode = 'force' | 'hierarchical' | 'circular' | 'grid';
+export type LayoutMode = 'force' | 'hierarchical' | 'hierarchical-horizontal' | 'circular' | 'grid';
 export type FilterLayer = 'physical' | 'datalink' | 'network' | 'transport' | 'application';
