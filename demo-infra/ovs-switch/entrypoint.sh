@@ -71,6 +71,11 @@ ip link set $DATA_IF up
 echo "Enabling forwarding..."
 echo 1 > /proc/sys/net/ipv4/ip_forward
 
+# Set passwords for SSH access
+echo "Setting up passwords..."
+echo 'root:ansible123' | chpasswd
+echo 'ovsuser:ansible123' | chpasswd
+
 # Start SSH  
 echo "Starting SSH..."
 service ssh start

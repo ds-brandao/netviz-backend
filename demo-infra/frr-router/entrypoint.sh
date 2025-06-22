@@ -66,6 +66,11 @@ echo "Adding forwarding rules..."
 iptables -A FORWARD -i "$CLIENT_IF" -o "$SERVER_IF" -j ACCEPT
 iptables -A FORWARD -i "$SERVER_IF" -o "$CLIENT_IF" -j ACCEPT
 
+# Set passwords for SSH access
+echo "Setting up passwords..."
+echo 'root:ansible123' | chpasswd
+echo 'frruser:ansible123' | chpasswd
+
 # Start SSH
 echo "Starting SSH..."
 service ssh start
