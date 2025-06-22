@@ -1,0 +1,386 @@
+---
+# =============================================================================
+# ANSIBLE PLAYBOOK TEMPLATE: FRROUTING CONFIGURATION RETRIEVAL
+# =============================================================================
+# Purpose: Retrieve FRRouting configurations from containerized routers
+# Target: Docker containers running FRRouting service
+# AI Agent Usage: Fill in required variables and execute for router backup
+# =============================================================================
+
+- name: "Retrieve FRRouting Router Configurations"
+  hosts: "{{ target_hosts | default('routers') }}"
+  gather_facts: true
+  become: true
+  serial: "{{ batch_size | default(1) }}"
+  
+  vars:
+    # ==========================================================================
+    # REQUIRED VARIABLES - AI AGENT MUST DEFINE
+    # ==========================================================================
+    # target_hosts: "solo_r1"  # or "infra_r1", "routers", pattern matching
+    
+    # ==========================================================================
+    # CONFIGURATION OPTIONS
+    # ==========================================================================
+    backup_timestamp: "{{ ansible_date_time.epoch }}"
+    backup_directory: "/tmp/frr_backups/{{ backup_timestamp }}"
+    
+    # FRR-specific configuration retrieval commands
+    frr_commands:
+      basic:
+        - cmd: "show running-config"
+          output: "running_config"
+        - cmd: "show version"
+          output: "version_info"
+        - cmd: "show daemons"
+          output: "daemons_status"
+        - cmd: "show ip route"
+          output: "routing_table"
+        - cmd: "show interface"
+          output: "interfaces"
+      bgp:
+        - cmd: "show ip bgp summary"
+          output: "bgp_summary"
+        - cmd: "show ip bgp neighbors"
+          output: "bgp_neighbors"
+        - cmd: "show ip bgp"
+          output: "bgp_routes"
+        - cmd: "show bgp ipv4 unicast"
+          output: "bgp_ipv4_unicast"
+      ospf:
+        - cmd: "show ip ospf neighbor"
+          output: "ospf_neighbors"
+        - cmd: "show ip ospf interface"
+          output: "ospf_interfaces"
+        - cmd: "show ip ospf database"
+          output: "ospf_database"
+        - cmd: "show ip ospf route"
+          output: "ospf_routes"
+      isis:
+        - cmd: "show isis neighbor"
+          output: "isis_neighbors"
+        - cmd: "show isis interface"
+          output: "isis_interfaces"
+        - cmd: "show isis database"
+          output: "isis_database"
+      rip:
+        - cmd: "show ip rip"
+          output: "rip_routes"
+        - cmd: "show ip rip status"
+          output: "rip_status"
+      static:
+        - cmd: "show ip route static"
+          output: "static_routes"
+      vrf:
+        - cmd: "show vrf"
+          output: "vrf_list"
+        - cmd: "show ip route vrf all"
+          output: "vrf_routes"
+    
+    # Output configuration
+    output_format: "{{ config_output_format | default('json') }}"
+    include_diagnostics: "{{ include_frr_diagnostics | default(true) }}"
+    compress_backup: "{{ compress_frr_backup | default(false) }}"
+    
+    # Error handling
+    continue_on_error: "{{ ignore_command_errors | default(false) }}"
+    command_timeout: "{{ frr_command_timeout | default(30) }}"
+
+  pre_tasks:
+    # ==========================================================================
+    # VALIDATION AND PREPARATION
+    # ==========================================================================
+    - name: "Validate FRRouting service is available"
+      ansible.builtin.systemd:
+        name: frr
+      register: frr_service_check
+      failed_when: false
+      tags: [validation, frr]
+
+    - name: "Ensure target is a FRRouting device"
+      ansible.builtin.fail:
+        msg: "Host {{ inventory_hostname }} does not have FRRouting service running"
+      when: 
+        - frr_service_check.status is not defined
+        - not (frr_service_check.status.ActiveState | default('inactive') == 'active')
+      tags: [validation]
+
+    - name: "Create backup directory structure"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ backup_directory }}"
+        - "{{ backup_directory }}/{{ inventory_hostname }}"
+        - "{{ backup_directory }}/{{ inventory_hostname }}/configs"
+        - "{{ backup_directory }}/{{ inventory_hostname }}/diagnostics"
+      delegate_to: localhost
+      tags: [preparation, backup]
+
+  tasks:
+    # ==========================================================================
+    # DAEMON DETECTION
+    # ==========================================================================
+    - name: "Detect active FRR daemons"
+      block:
+        - name: "Read FRR daemons configuration"
+          ansible.builtin.slurp:
+            src: /etc/frr/daemons
+          register: frr_daemons_file
+
+        - name: "Parse active daemons"
+          ansible.builtin.set_fact:
+            active_daemons:
+              bgpd: "{{ (frr_daemons_file.content | b64decode | regex_search('bgpd=yes')) is not none }}"
+              ospfd: "{{ (frr_daemons_file.content | b64decode | regex_search('ospfd=yes')) is not none }}"
+              ospf6d: "{{ (frr_daemons_file.content | b64decode | regex_search('ospf6d=yes')) is not none }}"
+              ripd: "{{ (frr_daemons_file.content | b64decode | regex_search('ripd=yes')) is not none }}"
+              ripngd: "{{ (frr_daemons_file.content | b64decode | regex_search('ripngd=yes')) is not none }}"
+              isisd: "{{ (frr_daemons_file.content | b64decode | regex_search('isisd=yes')) is not none }}"
+              pimd: "{{ (frr_daemons_file.content | b64decode | regex_search('pimd=yes')) is not none }}"
+              ldpd: "{{ (frr_daemons_file.content | b64decode | regex_search('ldpd=yes')) is not none }}"
+              nhrpd: "{{ (frr_daemons_file.content | b64decode | regex_search('nhrpd=yes')) is not none }}"
+              eigrpd: "{{ (frr_daemons_file.content | b64decode | regex_search('eigrpd=yes')) is not none }}"
+              babeld: "{{ (frr_daemons_file.content | b64decode | regex_search('babeld=yes')) is not none }}"
+              sharpd: "{{ (frr_daemons_file.content | b64decode | regex_search('sharpd=yes')) is not none }}"
+              pbrd: "{{ (frr_daemons_file.content | b64decode | regex_search('pbrd=yes')) is not none }}"
+              bfdd: "{{ (frr_daemons_file.content | b64decode | regex_search('bfdd=yes')) is not none }}"
+              fabricd: "{{ (frr_daemons_file.content | b64decode | regex_search('fabricd=yes')) is not none }}"
+              vrrpd: "{{ (frr_daemons_file.content | b64decode | regex_search('vrrpd=yes')) is not none }}"
+
+        - name: "Display detected daemons"
+          ansible.builtin.debug:
+            msg: "Active FRR daemons: {{ active_daemons | dict2items | selectattr('value') | map(attribute='key') | list }}"
+      tags: [discovery, daemons]
+
+    # ==========================================================================
+    # BASIC CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve basic FRR configurations"
+      ansible.builtin.shell: |
+        vtysh -c '{{ item.cmd }}'
+      register: basic_configs
+      loop: "{{ frr_commands.basic }}"
+      loop_control:
+        label: "{{ item.cmd }}"
+      changed_when: false
+      timeout: "{{ command_timeout }}"
+      tags: [retrieval, basic]
+
+    - name: "Store basic configurations"
+      ansible.builtin.copy:
+        content: "{{ item.stdout }}"
+        dest: "{{ backup_directory }}/{{ inventory_hostname }}/configs/{{ item.item.output }}.txt"
+      loop: "{{ basic_configs.results }}"
+      loop_control:
+        label: "{{ item.item.output }}"
+      delegate_to: localhost
+      tags: [storage, basic]
+
+    # ==========================================================================
+    # BGP CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve BGP configurations"
+      when: active_daemons.bgpd | default(false)
+      block:
+        - name: "Execute BGP commands"
+          ansible.builtin.shell: |
+            vtysh -c '{{ item.cmd }}'
+          register: bgp_configs
+          loop: "{{ frr_commands.bgp }}"
+          loop_control:
+            label: "{{ item.cmd }}"
+          changed_when: false
+          failed_when: false
+          timeout: "{{ command_timeout }}"
+
+        - name: "Store BGP configurations"
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/configs/{{ item.item.output }}.txt"
+          loop: "{{ bgp_configs.results }}"
+          loop_control:
+            label: "{{ item.item.output }}"
+          when: item.rc == 0
+          delegate_to: localhost
+      tags: [retrieval, bgp]
+
+    # ==========================================================================
+    # OSPF CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve OSPF configurations"
+      when: active_daemons.ospfd | default(false)
+      block:
+        - name: "Execute OSPF commands"
+          ansible.builtin.shell: |
+            vtysh -c '{{ item.cmd }}'
+          register: ospf_configs
+          loop: "{{ frr_commands.ospf }}"
+          loop_control:
+            label: "{{ item.cmd }}"
+          changed_when: false
+          failed_when: false
+          timeout: "{{ command_timeout }}"
+
+        - name: "Store OSPF configurations"
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/configs/{{ item.item.output }}.txt"
+          loop: "{{ ospf_configs.results }}"
+          loop_control:
+            label: "{{ item.item.output }}"
+          when: item.rc == 0
+          delegate_to: localhost
+      tags: [retrieval, ospf]
+
+    # ==========================================================================
+    # CONFIGURATION FILES BACKUP
+    # ==========================================================================
+    - name: "Backup FRR configuration files"
+      block:
+        - name: "List FRR configuration files"
+          ansible.builtin.find:
+            paths: /etc/frr
+            patterns:
+              - "*.conf"
+              - "daemons"
+              - "vtysh.conf"
+          register: frr_config_files
+
+        - name: "Read configuration files"
+          ansible.builtin.slurp:
+            src: "{{ item.path }}"
+          register: config_file_contents
+          loop: "{{ frr_config_files.files }}"
+          loop_control:
+            label: "{{ item.path }}"
+
+        - name: "Store configuration files"
+          ansible.builtin.copy:
+            content: "{{ item.content | b64decode }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/configs/{{ item.item.path | basename }}"
+          loop: "{{ config_file_contents.results }}"
+          loop_control:
+            label: "{{ item.item.path | basename }}"
+          delegate_to: localhost
+      tags: [backup, files]
+
+    # ==========================================================================
+    # DIAGNOSTICS COLLECTION
+    # ==========================================================================
+    - name: "Collect FRR diagnostics"
+      when: include_diagnostics | bool
+      block:
+        - name: "Collect memory usage"
+          ansible.builtin.shell: |
+            vtysh -c 'show memory'
+          register: memory_usage
+          changed_when: false
+          failed_when: false
+
+        - name: "Collect thread CPU usage"
+          ansible.builtin.shell: |
+            vtysh -c 'show thread cpu'
+          register: thread_cpu
+          changed_when: false
+          failed_when: false
+
+        - name: "Collect logging information"
+          ansible.builtin.shell: |
+            vtysh -c 'show logging'
+          register: logging_info
+          changed_when: false
+          failed_when: false
+
+        - name: "Store diagnostics"
+          ansible.builtin.copy:
+            content: |
+              === FRR Diagnostics for {{ inventory_hostname }} ===
+              Timestamp: {{ ansible_date_time.iso8601 }}
+              
+              === Memory Usage ===
+              {{ memory_usage.stdout | default('N/A') }}
+              
+              === Thread CPU Usage ===
+              {{ thread_cpu.stdout | default('N/A') }}
+              
+              === Logging Information ===
+              {{ logging_info.stdout | default('N/A') }}
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/diagnostics/system_diagnostics.txt"
+          delegate_to: localhost
+      tags: [diagnostics]
+
+    # ==========================================================================
+    # CONSOLIDATED OUTPUT GENERATION
+    # ==========================================================================
+    - name: "Generate consolidated configuration output"
+      block:
+        - name: "Prepare configuration data structure"
+          ansible.builtin.set_fact:
+            frr_config_data:
+              metadata:
+                hostname: "{{ inventory_hostname }}"
+                timestamp: "{{ ansible_date_time.iso8601 }}"
+                frr_version: "{{ basic_configs.results | selectattr('item.output', 'equalto', 'version_info') | map(attribute='stdout') | first | default('Unknown') }}"
+                active_daemons: "{{ active_daemons | dict2items | selectattr('value') | map(attribute='key') | list }}"
+              configurations:
+                running_config: "{{ basic_configs.results | selectattr('item.output', 'equalto', 'running_config') | map(attribute='stdout') | first | default('') }}"
+                routing_table: "{{ basic_configs.results | selectattr('item.output', 'equalto', 'routing_table') | map(attribute='stdout') | first | default('') }}"
+                interfaces: "{{ basic_configs.results | selectattr('item.output', 'equalto', 'interfaces') | map(attribute='stdout') | first | default('') }}"
+              protocol_configs:
+                bgp: "{{ bgp_configs.results | default([]) | selectattr('rc', 'equalto', 0) | map(attribute='stdout') | list if active_daemons.bgpd | default(false) else [] }}"
+                ospf: "{{ ospf_configs.results | default([]) | selectattr('rc', 'equalto', 0) | map(attribute='stdout') | list if active_daemons.ospfd | default(false) else [] }}"
+
+        - name: "Save consolidated JSON output"
+          ansible.builtin.copy:
+            content: "{{ frr_config_data | to_nice_json }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/frr_complete_config.json"
+          delegate_to: localhost
+          when: output_format == 'json'
+
+        - name: "Save consolidated YAML output"
+          ansible.builtin.copy:
+            content: "{{ frr_config_data | to_nice_yaml }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/frr_complete_config.yml"
+          delegate_to: localhost
+          when: output_format == 'yaml'
+      tags: [output, consolidation]
+
+    # ==========================================================================
+    # COMPRESSION AND ARCHIVING
+    # ==========================================================================
+    - name: "Compress backup if requested"
+      when: compress_backup | bool
+      ansible.builtin.archive:
+        path: "{{ backup_directory }}/{{ inventory_hostname }}"
+        dest: "{{ backup_directory }}/{{ inventory_hostname }}_frr_backup.tar.gz"
+        format: gz
+      delegate_to: localhost
+      tags: [compression, archive]
+
+  post_tasks:
+    - name: "Generate retrieval summary"
+      ansible.builtin.debug:
+        msg:
+          - "FRR configuration retrieval completed"
+          - "Host: {{ inventory_hostname }}"
+          - "Active daemons: {{ active_daemons | dict2items | selectattr('value') | map(attribute='key') | list }}"
+          - "Backup location: {{ backup_directory }}/{{ inventory_hostname }}"
+      tags: [summary]
+
+    - name: "Create completion marker"
+      ansible.builtin.file:
+        path: "{{ backup_directory }}/{{ inventory_hostname }}/.complete"
+        state: touch
+      delegate_to: localhost
+      tags: [completion]
+
+  handlers:
+    - name: "Log retrieval completion"
+      ansible.builtin.lineinfile:
+        path: "{{ backup_directory }}/retrieval.log"
+        line: "{{ ansible_date_time.iso8601 }} - {{ inventory_hostname }} - FRR - SUCCESS"
+        create: true
+      delegate_to: localhost
+      listen: "log completion"

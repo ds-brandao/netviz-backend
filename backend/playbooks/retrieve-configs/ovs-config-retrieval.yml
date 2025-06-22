@@ -1,0 +1,504 @@
+---
+# =============================================================================
+# ANSIBLE PLAYBOOK TEMPLATE: OPEN VSWITCH CONFIGURATION RETRIEVAL
+# =============================================================================
+# Purpose: Retrieve Open vSwitch configurations from containerized switches
+# Target: Docker containers running Open vSwitch service
+# AI Agent Usage: Fill in required variables and execute for switch backup
+# =============================================================================
+
+- name: "Retrieve Open vSwitch Configurations"
+  hosts: "{{ target_hosts | default('switches') }}"
+  gather_facts: true
+  become: true
+  serial: "{{ batch_size | default(1) }}"
+  
+  vars:
+    # ==========================================================================
+    # REQUIRED VARIABLES - AI AGENT MUST DEFINE
+    # ==========================================================================
+    # target_hosts: "solo_sw1"  # or "infra_sw1", "switches", pattern matching
+    
+    # ==========================================================================
+    # CONFIGURATION OPTIONS
+    # ==========================================================================
+    backup_timestamp: "{{ ansible_date_time.epoch }}"
+    backup_directory: "/tmp/ovs_backups/{{ backup_timestamp }}"
+    
+    # OVS-specific configuration retrieval commands
+    ovs_commands:
+      database:
+        - cmd: "ovs-vsctl show"
+          output: "database_overview"
+        - cmd: "ovs-vsctl list Open_vSwitch"
+          output: "ovs_system_info"
+        - cmd: "ovs-vsctl --version"
+          output: "version_info"
+      bridges:
+        - cmd: "ovs-vsctl list-br"
+          output: "bridge_list"
+        - cmd: "ovs-vsctl list Bridge"
+          output: "bridge_details"
+      ports:
+        - cmd: "ovs-vsctl list-ports {bridge}"
+          output: "port_list"
+          per_bridge: true
+        - cmd: "ovs-vsctl list Port"
+          output: "port_details"
+      interfaces:
+        - cmd: "ovs-vsctl list Interface"
+          output: "interface_details"
+        - cmd: "ovs-vsctl list-ifaces {bridge}"
+          output: "interface_list"
+          per_bridge: true
+      flows:
+        - cmd: "ovs-ofctl dump-flows {bridge}"
+          output: "flow_table"
+          per_bridge: true
+        - cmd: "ovs-ofctl dump-ports {bridge}"
+          output: "port_statistics"
+          per_bridge: true
+        - cmd: "ovs-ofctl dump-tables {bridge}"
+          output: "table_features"
+          per_bridge: true
+      qos:
+        - cmd: "ovs-vsctl list QoS"
+          output: "qos_config"
+        - cmd: "ovs-vsctl list Queue"
+          output: "queue_config"
+      controllers:
+        - cmd: "ovs-vsctl list Controller"
+          output: "controller_config"
+      manager:
+        - cmd: "ovs-vsctl list Manager"
+          output: "manager_config"
+      ssl:
+        - cmd: "ovs-vsctl list SSL"
+          output: "ssl_config"
+      sflow:
+        - cmd: "ovs-vsctl list sFlow"
+          output: "sflow_config"
+      netflow:
+        - cmd: "ovs-vsctl list NetFlow"
+          output: "netflow_config"
+      ipfix:
+        - cmd: "ovs-vsctl list IPFIX"
+          output: "ipfix_config"
+    
+    # Output configuration
+    output_format: "{{ config_output_format | default('json') }}"
+    include_flow_details: "{{ include_ovs_flows | default(true) }}"
+    include_statistics: "{{ include_ovs_stats | default(true) }}"
+    compress_backup: "{{ compress_ovs_backup | default(false) }}"
+    
+    # Performance options
+    flow_format: "{{ ovs_flow_format | default('openflow10') }}"  # openflow10, openflow13, etc.
+    stats_interval: "{{ ovs_stats_interval | default(5) }}"
+    
+    # Error handling
+    continue_on_error: "{{ ignore_command_errors | default(false) }}"
+    command_timeout: "{{ ovs_command_timeout | default(30) }}"
+
+  pre_tasks:
+    # ==========================================================================
+    # VALIDATION AND PREPARATION
+    # ==========================================================================
+    - name: "Validate Open vSwitch service is available"
+      ansible.builtin.systemd:
+        name: openvswitch-switch
+      register: ovs_service_check
+      failed_when: false
+      tags: [validation, ovs]
+
+    - name: "Ensure target is an Open vSwitch device"
+      ansible.builtin.fail:
+        msg: "Host {{ inventory_hostname }} does not have Open vSwitch service running"
+      when: 
+        - ovs_service_check.status is not defined
+        - not (ovs_service_check.status.ActiveState | default('inactive') == 'active')
+      tags: [validation]
+
+    - name: "Check OVS database connectivity"
+      ansible.builtin.shell: |
+        ovs-vsctl --timeout=5 show
+      register: ovs_db_check
+      failed_when: ovs_db_check.rc != 0
+      tags: [validation, database]
+
+    - name: "Create backup directory structure"
+      ansible.builtin.file:
+        path: "{{ item }}"
+        state: directory
+        mode: '0755'
+      loop:
+        - "{{ backup_directory }}"
+        - "{{ backup_directory }}/{{ inventory_hostname }}"
+        - "{{ backup_directory }}/{{ inventory_hostname }}/database"
+        - "{{ backup_directory }}/{{ inventory_hostname }}/bridges"
+        - "{{ backup_directory }}/{{ inventory_hostname }}/flows"
+        - "{{ backup_directory }}/{{ inventory_hostname }}/statistics"
+      delegate_to: localhost
+      tags: [preparation, backup]
+
+  tasks:
+    # ==========================================================================
+    # BRIDGE DISCOVERY
+    # ==========================================================================
+    - name: "Discover OVS bridges"
+      block:
+        - name: "Get list of bridges"
+          ansible.builtin.shell: |
+            ovs-vsctl list-br
+          register: bridge_list_raw
+          changed_when: false
+
+        - name: "Parse bridge list"
+          ansible.builtin.set_fact:
+            ovs_bridges: "{{ bridge_list_raw.stdout_lines | default([]) }}"
+
+        - name: "Display discovered bridges"
+          ansible.builtin.debug:
+            msg: "Discovered OVS bridges: {{ ovs_bridges }}"
+      tags: [discovery, bridges]
+
+    # ==========================================================================
+    # DATABASE CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve OVS database configurations"
+      ansible.builtin.shell: |
+        {{ item.cmd }}
+      register: database_configs
+      loop: "{{ ovs_commands.database }}"
+      loop_control:
+        label: "{{ item.cmd }}"
+      changed_when: false
+      timeout: "{{ command_timeout }}"
+      tags: [retrieval, database]
+
+    - name: "Store database configurations"
+      ansible.builtin.copy:
+        content: "{{ item.stdout }}"
+        dest: "{{ backup_directory }}/{{ inventory_hostname }}/database/{{ item.item.output }}.txt"
+      loop: "{{ database_configs.results }}"
+      loop_control:
+        label: "{{ item.item.output }}"
+      delegate_to: localhost
+      tags: [storage, database]
+
+    # ==========================================================================
+    # BRIDGE CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve bridge configurations"
+      block:
+        - name: "Get bridge details"
+          ansible.builtin.shell: |
+            {{ item.cmd }}
+          register: bridge_configs
+          loop: "{{ ovs_commands.bridges | selectattr('per_bridge', 'undefined') | list }}"
+          loop_control:
+            label: "{{ item.cmd }}"
+          changed_when: false
+
+        - name: "Store bridge configurations"
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/bridges/{{ item.item.output }}.txt"
+          loop: "{{ bridge_configs.results }}"
+          loop_control:
+            label: "{{ item.item.output }}"
+          delegate_to: localhost
+
+        - name: "Get per-bridge configurations"
+          ansible.builtin.shell: |
+            {{ item.0.cmd | replace('{bridge}', item.1) }}
+          register: per_bridge_configs
+          loop: "{{ ovs_commands.bridges | selectattr('per_bridge', 'defined') | product(ovs_bridges) | list }}"
+          loop_control:
+            label: "{{ item.0.output }} for {{ item.1 }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Store per-bridge configurations"
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/bridges/{{ item.item.1 }}_{{ item.item.0.output }}.txt"
+          loop: "{{ per_bridge_configs.results }}"
+          loop_control:
+            label: "{{ item.item.1 }}_{{ item.item.0.output }}"
+          when: item.rc == 0
+          delegate_to: localhost
+      tags: [retrieval, bridges]
+
+    # ==========================================================================
+    # PORT AND INTERFACE RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve port and interface configurations"
+      block:
+        - name: "Get port details"
+          ansible.builtin.shell: |
+            {{ item.cmd }}
+          register: port_configs
+          loop: "{{ ovs_commands.ports | selectattr('per_bridge', 'undefined') | list }}"
+          loop_control:
+            label: "{{ item.cmd }}"
+          changed_when: false
+
+        - name: "Get interface details"
+          ansible.builtin.shell: |
+            {{ item.cmd }}
+          register: interface_configs
+          loop: "{{ ovs_commands.interfaces | selectattr('per_bridge', 'undefined') | list }}"
+          loop_control:
+            label: "{{ item.cmd }}"
+          changed_when: false
+
+        - name: "Store port and interface configurations"
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/database/{{ item.item.output }}.txt"
+          loop: "{{ port_configs.results + interface_configs.results }}"
+          loop_control:
+            label: "{{ item.item.output }}"
+          delegate_to: localhost
+      tags: [retrieval, ports, interfaces]
+
+    # ==========================================================================
+    # FLOW TABLE RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve flow tables"
+      when: include_flow_details | bool
+      block:
+        - name: "Get flow tables for each bridge"
+          ansible.builtin.shell: |
+            {{ item.0.cmd | replace('{bridge}', item.1) }} -O {{ flow_format }}
+          register: flow_tables
+          loop: "{{ ovs_commands.flows | product(ovs_bridges) | list }}"
+          loop_control:
+            label: "{{ item.0.output }} for {{ item.1 }}"
+          changed_when: false
+          failed_when: false
+          timeout: "{{ command_timeout }}"
+
+        - name: "Store flow configurations"
+          ansible.builtin.copy:
+            content: "{{ item.stdout }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/flows/{{ item.item.1 }}_{{ item.item.0.output }}.txt"
+          loop: "{{ flow_tables.results }}"
+          loop_control:
+            label: "{{ item.item.1 }}_{{ item.item.0.output }}"
+          when: item.rc == 0
+          delegate_to: localhost
+
+        - name: "Generate flow summary"
+          ansible.builtin.shell: |
+            echo "=== Flow Table Summary for {{ item }} ===" && \
+            ovs-ofctl dump-flows {{ item }} -O {{ flow_format }} | \
+            awk 'NR>1 {count++} END {print "Total flows: " count}'
+          register: flow_summaries
+          loop: "{{ ovs_bridges }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Store flow summaries"
+          ansible.builtin.copy:
+            content: |
+              {% for summary in flow_summaries.results %}
+              {{ summary.stdout }}
+              {% endfor %}
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/flows/flow_summary.txt"
+          delegate_to: localhost
+      tags: [retrieval, flows]
+
+    # ==========================================================================
+    # STATISTICS COLLECTION
+    # ==========================================================================
+    - name: "Collect OVS statistics"
+      when: include_statistics | bool
+      block:
+        - name: "Get port statistics"
+          ansible.builtin.shell: |
+            ovs-ofctl dump-ports {{ item }}
+          register: port_stats
+          loop: "{{ ovs_bridges }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Get interface statistics"
+          ansible.builtin.shell: |
+            ovs-vsctl get Interface {{ item }} statistics
+          register: interface_stats
+          loop: "{{ ovs_bridges | map('regex_replace', '^(.*)$', 'ovs-vsctl list-ifaces \\1') | map('trim') | list }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Get queue statistics"
+          ansible.builtin.shell: |
+            ovs-ofctl queue-stats {{ item }}
+          register: queue_stats
+          loop: "{{ ovs_bridges }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Store statistics"
+          ansible.builtin.copy:
+            content: |
+              === OVS Statistics for {{ inventory_hostname }} ===
+              Timestamp: {{ ansible_date_time.iso8601 }}
+              
+              === Port Statistics ===
+              {% for stat in port_stats.results %}
+              Bridge: {{ stat.item }}
+              {{ stat.stdout | default('No statistics available') }}
+              
+              {% endfor %}
+              
+              === Queue Statistics ===
+              {% for stat in queue_stats.results %}
+              Bridge: {{ stat.item }}
+              {{ stat.stdout | default('No queue statistics available') }}
+              
+              {% endfor %}
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/statistics/ovs_statistics.txt"
+          delegate_to: localhost
+      tags: [statistics]
+
+    # ==========================================================================
+    # ADVANCED CONFIGURATION RETRIEVAL
+    # ==========================================================================
+    - name: "Retrieve advanced OVS configurations"
+      block:
+        - name: "Get QoS configurations"
+          ansible.builtin.shell: |
+            {{ item.cmd }}
+          register: qos_configs
+          loop: "{{ ovs_commands.qos }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Get controller configurations"
+          ansible.builtin.shell: |
+            {{ item.cmd }}
+          register: controller_configs
+          loop: "{{ ovs_commands.controllers }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Get monitoring configurations"
+          ansible.builtin.shell: |
+            {{ item.cmd }}
+          register: monitoring_configs
+          loop: "{{ ovs_commands.sflow + ovs_commands.netflow + ovs_commands.ipfix }}"
+          changed_when: false
+          failed_when: false
+
+        - name: "Store advanced configurations"
+          ansible.builtin.copy:
+            content: "{{ item.stdout | default('No configuration found') }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/database/{{ item.item.output }}.txt"
+          loop: "{{ qos_configs.results + controller_configs.results + monitoring_configs.results }}"
+          loop_control:
+            label: "{{ item.item.output }}"
+          delegate_to: localhost
+      tags: [retrieval, advanced]
+
+    # ==========================================================================
+    # DATABASE BACKUP
+    # ==========================================================================
+    - name: "Backup OVS database"
+      block:
+        - name: "Create database backup"
+          ansible.builtin.shell: |
+            ovsdb-client backup unix:/var/run/openvswitch/db.sock > /tmp/ovs_backup.db
+          register: db_backup
+          changed_when: false
+
+        - name: "Fetch database backup"
+          ansible.builtin.fetch:
+            src: /tmp/ovs_backup.db
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/database/ovsdb_backup.db"
+            flat: true
+
+        - name: "Clean up temporary backup"
+          ansible.builtin.file:
+            path: /tmp/ovs_backup.db
+            state: absent
+      tags: [backup, database]
+
+    # ==========================================================================
+    # CONSOLIDATED OUTPUT GENERATION
+    # ==========================================================================
+    - name: "Generate consolidated configuration output"
+      block:
+        - name: "Prepare configuration data structure"
+          ansible.builtin.set_fact:
+            ovs_config_data:
+              metadata:
+                hostname: "{{ inventory_hostname }}"
+                timestamp: "{{ ansible_date_time.iso8601 }}"
+                ovs_version: "{{ database_configs.results | selectattr('item.output', 'equalto', 'version_info') | map(attribute='stdout') | first | default('Unknown') }}"
+                bridges: "{{ ovs_bridges }}"
+              database:
+                overview: "{{ database_configs.results | selectattr('item.output', 'equalto', 'database_overview') | map(attribute='stdout') | first | default('') }}"
+                system_info: "{{ database_configs.results | selectattr('item.output', 'equalto', 'ovs_system_info') | map(attribute='stdout') | first | default('') }}"
+              bridges_config:
+                list: "{{ bridge_configs.results | selectattr('item.output', 'equalto', 'bridge_list') | map(attribute='stdout') | first | default('') }}"
+                details: "{{ bridge_configs.results | selectattr('item.output', 'equalto', 'bridge_details') | map(attribute='stdout') | first | default('') }}"
+              flows:
+                tables: "{{ flow_tables.results | default([]) | selectattr('rc', 'equalto', 0) | map(attribute='stdout') | list }}"
+                summary: "{{ flow_summaries.results | default([]) | map(attribute='stdout') | list }}"
+              statistics:
+                ports: "{{ port_stats.results | default([]) | selectattr('rc', 'equalto', 0) | map(attribute='stdout') | list }}"
+                queues: "{{ queue_stats.results | default([]) | selectattr('rc', 'equalto', 0) | map(attribute='stdout') | list }}"
+
+        - name: "Save consolidated JSON output"
+          ansible.builtin.copy:
+            content: "{{ ovs_config_data | to_nice_json }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/ovs_complete_config.json"
+          delegate_to: localhost
+          when: output_format == 'json'
+
+        - name: "Save consolidated YAML output"
+          ansible.builtin.copy:
+            content: "{{ ovs_config_data | to_nice_yaml }}"
+            dest: "{{ backup_directory }}/{{ inventory_hostname }}/ovs_complete_config.yml"
+          delegate_to: localhost
+          when: output_format == 'yaml'
+      tags: [output, consolidation]
+
+    # ==========================================================================
+    # COMPRESSION AND ARCHIVING
+    # ==========================================================================
+    - name: "Compress backup if requested"
+      when: compress_backup | bool
+      ansible.builtin.archive:
+        path: "{{ backup_directory }}/{{ inventory_hostname }}"
+        dest: "{{ backup_directory }}/{{ inventory_hostname }}_ovs_backup.tar.gz"
+        format: gz
+      delegate_to: localhost
+      tags: [compression, archive]
+
+  post_tasks:
+    - name: "Generate retrieval summary"
+      ansible.builtin.debug:
+        msg:
+          - "OVS configuration retrieval completed"
+          - "Host: {{ inventory_hostname }}"
+          - "Bridges: {{ ovs_bridges | join(', ') }}"
+          - "Backup location: {{ backup_directory }}/{{ inventory_hostname }}"
+      tags: [summary]
+
+    - name: "Create completion marker"
+      ansible.builtin.file:
+        path: "{{ backup_directory }}/{{ inventory_hostname }}/.complete"
+        state: touch
+      delegate_to: localhost
+      tags: [completion]
+
+  handlers:
+    - name: "Log retrieval completion"
+      ansible.builtin.lineinfile:
+        path: "{{ backup_directory }}/retrieval.log"
+        line: "{{ ansible_date_time.iso8601 }} - {{ inventory_hostname }} - OVS - SUCCESS"
+        create: true
+      delegate_to: localhost
+      listen: "log completion"

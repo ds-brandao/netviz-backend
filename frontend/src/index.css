@@ -1,0 +1,190 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+body {
+  margin: 0;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar styles */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.05);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* Enhanced Liquid Glass Styles - Based on Official liquid-glass-react Implementation */
+@layer utilities {
+  /* Enhanced glass morphism container */
+  .glass-morphism {
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(20px) saturate(180%);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 
+      0 8px 32px rgba(0, 0, 0, 0.3),
+      inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  }
+
+  /* Liquid glass glow effect */
+  .liquid-glow {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .liquid-glow::before {
+    content: '';
+    position: absolute;
+    top: -2px;
+    left: -2px;
+    right: -2px;
+    bottom: -2px;
+    background: linear-gradient(45deg, 
+      rgba(59, 130, 246, 0.15), 
+      rgba(168, 85, 247, 0.15), 
+      rgba(59, 130, 246, 0.15)
+    );
+    border-radius: inherit;
+    z-index: -1;
+    animation: liquid-pulse 4s ease-in-out infinite;
+  }
+  
+  @keyframes liquid-pulse {
+    0%, 100% {
+      opacity: 0.3;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 0.7;
+      transform: scale(1.02);
+    }
+  }
+
+  /* Enhanced hover interactions */
+  .liquid-hover {
+    transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .liquid-hover:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: 
+      0 12px 40px rgba(59, 130, 246, 0.25),
+      0 6px 20px rgba(168, 85, 247, 0.15),
+      inset 0 1px 0 rgba(255, 255, 255, 0.3);
+  }
+
+  /* Button ripple effect */
+  .liquid-ripple {
+    position: relative;
+    overflow: hidden;
+  }
+  
+  .liquid-ripple::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: 0;
+    height: 0;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.3);
+    transform: translate(-50%, -50%);
+    transition: width 0.6s, height 0.6s;
+  }
+  
+  .liquid-ripple:active::after {
+    width: 300px;
+    height: 300px;
+  }
+
+  /* Enhanced focus states */
+  .liquid-focus:focus {
+    outline: none;
+    box-shadow: 
+      0 0 0 2px rgba(59, 130, 246, 0.5),
+      0 8px 32px rgba(59, 130, 246, 0.2);
+  }
+
+  /* Smooth animations for state changes */
+  .liquid-transition {
+    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  /* Enhanced backdrop blur support */
+  .enhanced-backdrop {
+    backdrop-filter: blur(24px) saturate(200%) brightness(1.1);
+    -webkit-backdrop-filter: blur(24px) saturate(200%) brightness(1.1);
+  }
+
+  /* Network layer color indicators with glow */
+  .layer-indicator {
+    position: relative;
+  }
+  
+  .layer-indicator::after {
+    content: '';
+    position: absolute;
+    inset: -2px;
+    border-radius: 50%;
+    background: inherit;
+    filter: blur(4px);
+    opacity: 0.6;
+    z-index: -1;
+  }
+
+  /* Responsive design utilities */
+  @media (max-width: 640px) {
+    .liquid-glass-panel {
+      max-width: calc(100vw - 2rem);
+      margin: 0 1rem;
+    }
+  }
+
+  /* Performance optimizations */
+  .liquid-optimized {
+    will-change: transform, opacity;
+    transform: translateZ(0);
+  }
+
+  /* Tab indicator animation */
+  .tab-indicator {
+    position: relative;
+  }
+  
+  .tab-indicator::before {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, 
+      rgba(59, 130, 246, 0.8), 
+      rgba(168, 85, 247, 0.8)
+    );
+    transform: scaleX(0);
+    transition: transform 0.3s ease;
+  }
+  
+  .tab-indicator.active::before {
+    transform: scaleX(1);
+  }
+}
