@@ -318,29 +318,93 @@ async def run_ansible_playbook(playbook_content: str, inventory: str = "localhos
 
 @tool
 async def get_recent_logs(device_name: Optional[str] = None, time_range: int = 2, log_level: Optional[str] = None) -> str:
-    """Get recent logs from OpenSearch using the AI query endpoint"""
+    """Get recent logs from OpenSearch directly"""
+    print(f"=== GET_RECENT_LOGS FUNCTION DEBUG ===")
+    print(f"Received parameters: device_name='{device_name}', time_range={time_range}, log_level='{log_level}'")
     try:
-        # Use the AI query logs endpoint we created
-        url = f"{BACKEND_API_BASE}/ai/query-logs"
+        # Import OpenSearch functionality from app.py
+        from app import get_opensearch_session, OPENSEARCH_BASE_URL
         
-        payload = {
-            "time_range": time_range,
-            "size": 20
+        # Device name to index mapping
+        device_to_index = {
+            "frr-router": "frr-router-logs",
+            "switch1": "switch1-logs", 
+            "switch2": "switch2-logs",
+            "server": "server-logs",
+            "client": "client-logs"
         }
         
+        # Default to searching all log indexes if no specific device
+        target_indexes = "*-logs"
+        
         if device_name:
-            payload["device_name"] = device_name
+            # Map device name to specific index
+            if device_name in device_to_index:
+                target_indexes = device_to_index[device_name]
+                print(f"Mapping device '{device_name}' to index '{target_indexes}'")
+            else:
+                # Fallback to wildcard search
+                target_indexes = f"*{device_name}*-logs"
+                print(f"Using fallback mapping for device '{device_name}': {target_indexes}")
+        
+        # Build OpenSearch query
+        opensearch_query = {
+            "size": 20,
+            "sort": [{"@timestamp": {"order": "desc"}}],
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "range": {
+                                "@timestamp": {
+                                    "gte": f"now-{time_range}h"
+                                }
+                            }
+                        }
+                    ]
+                }
+            }
+        }
         
         if log_level:
-            payload["log_level"] = log_level.upper()
+            opensearch_query["query"]["bool"]["must"].append({
+                "term": {"level": log_level.upper()}
+            })
         
-        response = requests.post(url, json=payload, timeout=10)
+        session = get_opensearch_session()
+        url = f"{OPENSEARCH_BASE_URL}/{target_indexes}/_search"
         
-        if response.status_code != 200:
-            return f"Failed to fetch logs: {response.status_code} - {response.text}"
+        print(f"Querying OpenSearch directly: {url}")
+        print(f"Query: {opensearch_query}")
+        
+        response = session.post(url, json=opensearch_query, headers={"Content-Type": "application/json"})
+        response.raise_for_status()
         
         data = response.json()
-        logs = data.get("logs", [])
+        logs = []
+        
+        print(f"OpenSearch returned {data.get('hits', {}).get('total', {}).get('value', 0)} total hits")
+        
+        for hit in data.get("hits", {}).get("hits", []):
+            source = hit["_source"]
+            log_message = source.get("log", source.get("message", ""))
+            
+            # Infer log level from content
+            level = "INFO"
+            if any(keyword in log_message.lower() for keyword in ["error", "fail", "exception"]):
+                level = "ERROR"
+            elif any(keyword in log_message.lower() for keyword in ["warn", "warning"]):
+                level = "WARN"
+            
+            logs.append({
+                "id": hit["_id"],
+                "timestamp": source.get("@timestamp"),
+                "level": level,
+                "service": hit.get("_index", "").replace("-logs", ""),
+                "message": log_message,
+            })
+        
+        print(f"Processed {len(logs)} logs")
         
         if not logs:
             filter_desc = f"last {time_range} hours"
@@ -348,7 +412,9 @@ async def get_recent_logs(device_name: Optional[str] = None, time_range: int = 2
                 filter_desc += f" for device {device_name}"
             if log_level:
                 filter_desc += f" with level {log_level}"
-            return f"No logs found for {filter_desc}"
+            result = f"No logs found for {filter_desc}"
+            print(f"Returning: {result}")
+            return result
         
         # Format logs for display
         log_summary = f"**Recent Logs** ({len(logs)} entries"
@@ -360,8 +426,7 @@ async def get_recent_logs(device_name: Optional[str] = None, time_range: int = 2
             timestamp = log.get('timestamp', 'Unknown time')
             level = log.get('level', 'INFO')
             message = log.get('message', 'No message')
-            event_type = log.get('event_type', 'unknown')
-            node = log.get('node_id', 'unknown')
+            service = log.get('service', 'unknown')
             
             # Format timestamp more readable
             try:
@@ -371,7 +436,6 @@ async def get_recent_logs(device_name: Optional[str] = None, time_range: int = 2
             except:
                 time_str = timestamp
             
-            service = log.get('service', node)
             log_summary += f"`{time_str}` **{level}** [{service}]: {message}\n"
             
         

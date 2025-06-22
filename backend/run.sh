@@ -9,7 +9,7 @@ fi
 
 # Start PostgreSQL with docker-compose
 echo "Starting PostgreSQL..."
-docker-compose up -d
+docker compose up -d
 
 # Wait for PostgreSQL to be ready
 echo "Waiting for PostgreSQL to be ready..."

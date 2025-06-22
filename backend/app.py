@@ -551,12 +551,28 @@ async def ai_query_logs(
             }
         }
         
+        # Device name to index mapping
+        device_to_index = {
+            "frr-router": "frr-router-logs",
+            "switch1": "switch1-logs", 
+            "switch2": "switch2-logs",
+            "server": "server-logs",
+            "client": "client-logs"
+        }
+        
+        # Default to searching all log indexes if no specific device
+        target_indexes = "*-logs"
+        
         # Add filters based on parameters
         if device_name:
-            # Filter by index name (e.g., "client" should match "client-logs" index)
-            opensearch_query["query"]["bool"]["must"].append({
-                "wildcard": {"_index": f"*{device_name}*"}
-            })
+            # Map device name to specific index
+            if device_name in device_to_index:
+                target_indexes = device_to_index[device_name]
+                print(f"Mapping device '{device_name}' to index '{target_indexes}'")
+            else:
+                # Fallback to wildcard search
+                target_indexes = f"*{device_name}*-logs"
+                print(f"Using fallback mapping for device '{device_name}': {target_indexes}")
         
         if service:
             opensearch_query["query"]["bool"]["must"].append({
@@ -574,8 +590,8 @@ async def ai_query_logs(
             })
         
         session = get_opensearch_session()
-        indices = "*-logs"
-        url = f"{OPENSEARCH_BASE_URL}/{indices}/_search"
+        url = f"{OPENSEARCH_BASE_URL}/{target_indexes}/_search"
+        print(f"Querying OpenSearch URL: {url}")
         
         response = session.post(url, json=opensearch_query, headers={"Content-Type": "application/json"})
         response.raise_for_status()
