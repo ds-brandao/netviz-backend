@@ -100,6 +100,12 @@ export interface ChatStreamEvent {
   type: 'text' | 'done' | 'error' | 'tool_call' | 'tool_result' | 'thinking' | 'markdown' | 'code' | 'ssh_session' | 'ansible_playbook';
   content?: string;
   error?: string;
+  // Tool calling fields (matching backend response)
+  toolCallId?: string;
+  toolName?: string;
+  args?: Record<string, unknown>;
+  result?: unknown;
+  // Legacy fields for backward compatibility
   tool_name?: string;
   tool_args?: Record<string, unknown>;
   thinking?: string;

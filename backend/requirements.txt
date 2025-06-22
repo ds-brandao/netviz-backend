@@ -14,3 +14,4 @@ sse-starlette
 websockets
 aiohttp
 requests
+llama-api-client>=1.0.0

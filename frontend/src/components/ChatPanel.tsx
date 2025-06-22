@@ -7,11 +7,6 @@ import { useTheme } from '../contexts/ThemeContext';
 
 interface ChatPanelProps {
   focusedNode?: NetworkNode;
-  networkStats?: {
-    totalNodes: number;
-    active: number;
-    issues: number;
-  };
   onClose?: () => void;
 }
 
@@ -29,7 +24,6 @@ interface Message {
 
 export const ChatPanel: React.FC<ChatPanelProps> = ({
   focusedNode,
-  networkStats,
   onClose,
 }) => {
   const { theme } = useTheme();
@@ -78,18 +72,15 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
     abortControllerRef.current = new AbortController();
 
     try {
-      for await (const chunk of ApiService.streamChat({
+      for await (const chunk of ApiService.streamChatMessage({
         message: userMessage.content,
+        session_id: 'default',
         context: {
           focused_node: focusedNode,
-          network_stats: networkStats ? {
-            total_nodes: networkStats.totalNodes,
-            active: networkStats.active,
-            issues: networkStats.issues,
-          } : undefined,
         },
-        signal: abortControllerRef.current.signal,
       })) {
+        console.log('🔍 Received chunk:', chunk); // DEBUG: Log all chunks
+        
         if (chunk.type === 'text') {
           setMessages(prev =>
             prev.map(m =>
@@ -99,6 +90,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )
           );
         } else if (chunk.type === 'tool_call') {
+          console.log('🔧 Processing tool_call:', chunk); // DEBUG: Log tool calls
           setMessages(prev =>
             prev.map(m =>
               m.id === assistantId
@@ -107,9 +99,9 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
                     toolCalls: [
                       ...(m.toolCalls || []),
                       {
-                        id: chunk.toolCallId,
-                        name: chunk.toolName,
-                        args: chunk.args as Record<string, unknown>,
+                        id: chunk.toolCallId!,
+                        name: chunk.toolName!,
+                        args: chunk.args!,
                       },
                     ],
                   }
@@ -117,6 +109,7 @@ export const ChatPanel: React.FC<ChatPanelProps> = ({
             )
           );
         } else if (chunk.type === 'tool_result') {
+          console.log('✅ Processing tool_result:', chunk); // DEBUG: Log tool results
           setMessages(prev =>
             prev.map(m =>
               m.id === assistantId
