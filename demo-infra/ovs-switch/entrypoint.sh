@@ -19,10 +19,8 @@ if [ -d /root/.ssh ]; then
         chown ovsuser:ovsuser /home/ovsuser/.ssh/authorized_keys
         chmod 600 /home/ovsuser/.ssh/authorized_keys
         
-        # Ensure root's .ssh directory has proper permissions
-        echo "Setting up authorized_keys for root"
-        chmod 700 /root/.ssh
-        chmod 600 /root/.ssh/authorized_keys
+        # Note: /root/.ssh is mounted read-only, permissions are already set
+        echo "SSH keys configured for root (read-only mount)"
     else
         echo "No authorized_keys file found in /root/.ssh/"
     fi
