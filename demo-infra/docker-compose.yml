@@ -25,6 +25,7 @@ services:
       - "7771:22"
     volumes:
       - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/switch1:/var/log/switch1
     networks:
       management:
         ipv4_address: 172.25.0.11
@@ -42,6 +43,7 @@ services:
       - "7777:22"
     volumes:
       - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/frr-router:/var/log/frr-router
     networks:
       management:
         ipv4_address: 172.25.0.10
@@ -59,6 +61,7 @@ services:
       - "7778:22"
     volumes:
       - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/switch2:/var/log/switch2
     networks:
       management:
         ipv4_address: 172.25.0.12
@@ -71,6 +74,8 @@ services:
     privileged: true
     depends_on:
       - switch1
+    volumes:
+      - ./logs/client:/var/log/client
     networks:
       management:
         ipv4_address: 172.25.0.5
@@ -89,6 +94,7 @@ services:
       - "8080:8080"
     volumes:
       - /home/jack/.ssh:/root/.ssh:ro
+      - ./logs/server:/var/log/server
     networks:
       management:
         ipv4_address: 172.25.0.20

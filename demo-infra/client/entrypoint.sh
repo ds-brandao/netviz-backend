@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Setup logging
+LOG_DIR="/var/log/client"
+mkdir -p "$LOG_DIR"
+exec 1> >(tee -a "$LOG_DIR/client.log")
+exec 2> >(tee -a "$LOG_DIR/client-error.log")
+
 # Client doesn't need SSH server - removing SSH configuration
 
 # Find interfaces
@@ -36,6 +42,25 @@ ip addr show
 echo ""
 echo "Routing table:"
 ip route show
+
+# Start continuous logging process
+echo "$(date): Client container startup completed" >> "$LOG_DIR/system.log"
+
+# Log connectivity tests and network status
+(
+  while true; do
+    echo "$(date): Network connectivity test:" >> "$LOG_DIR/connectivity.log"
+    ping -c 1 192.168.30.10 >> "$LOG_DIR/connectivity.log" 2>&1 || echo "$(date): Ping to server failed" >> "$LOG_DIR/connectivity.log"
+    echo "$(date): HTTP test:" >> "$LOG_DIR/connectivity.log"
+    curl -s --max-time 5 http://192.168.30.10:8080 >> "$LOG_DIR/connectivity.log" 2>&1 || echo "$(date): HTTP request failed" >> "$LOG_DIR/connectivity.log"
+    echo "$(date): Interface stats:" >> "$LOG_DIR/system.log"
+    ip -s link show >> "$LOG_DIR/system.log" 2>&1
+    echo "$(date): Routing table:" >> "$LOG_DIR/system.log"
+    ip route show >> "$LOG_DIR/system.log" 2>&1
+    echo "$(date): Memory usage: $(free -h | grep Mem)" >> "$LOG_DIR/system.log"
+    sleep 60
+  done
+) &
 
 # Keep container running efficiently
 exec sleep infinity 

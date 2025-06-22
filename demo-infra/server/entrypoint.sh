@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+# Setup logging
+LOG_DIR="/var/log/server"
+mkdir -p "$LOG_DIR"
+exec 1> >(tee -a "$LOG_DIR/server.log")
+exec 2> >(tee -a "$LOG_DIR/server-error.log")
+
 # Copy SSH keys from mounted volume to both root and serveruser
 if [ -d /root/.ssh ]; then
     echo "SSH keys directory found at /root/.ssh"
@@ -51,6 +57,11 @@ echo "Setting up passwords..."
 echo 'root:ansible123' | chpasswd
 echo 'serveruser:ansible123' | chpasswd
 
+# Configure SSH logging
+echo "Configuring SSH logging..."
+echo "SyslogFacility LOCAL0" >> /etc/ssh/sshd_config
+echo "LogLevel INFO" >> /etc/ssh/sshd_config
+
 # Start SSH
 echo "Starting SSH..."
 service ssh start
@@ -67,10 +78,10 @@ ip route add 192.168.10.0/24 via 192.168.30.254 dev $SERVER_IF || true
 # Wait for network to be ready
 sleep 2
 
-# Start simple HTTP server
+# Start simple HTTP server with logging
 echo "Starting HTTP server on port 8080..."
 cd /var/www
-python3 -m http.server 8080 &
+python3 -m http.server 8080 > "$LOG_DIR/http-access.log" 2>&1 &
 
 echo "Services started successfully"
 echo "SSH: $(service ssh status | grep Active || echo 'Status unknown')"
@@ -83,6 +94,23 @@ ip addr show
 echo ""
 echo "Routing table:"
 ip route show
+
+# Start continuous logging process
+echo "$(date): Server container startup completed" >> "$LOG_DIR/system.log"
+
+# Log system metrics and HTTP access patterns
+(
+  while true; do
+    echo "$(date): Interface stats:" >> "$LOG_DIR/system.log"
+    ip -s link show >> "$LOG_DIR/system.log" 2>&1
+    echo "$(date): Network connections:" >> "$LOG_DIR/system.log"
+    netstat -tuln >> "$LOG_DIR/system.log" 2>&1
+    echo "$(date): Memory usage: $(free -h | grep Mem)" >> "$LOG_DIR/system.log"
+    echo "$(date): HTTP server process status:" >> "$LOG_DIR/system.log"
+    ps aux | grep python3 | grep -v grep >> "$LOG_DIR/system.log" 2>&1 || true
+    sleep 60
+  done
+) &
 
 # Keep container running efficiently
 exec sleep infinity 
