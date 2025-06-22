@@ -78,10 +78,14 @@ echo "Setting up passwords..."
 echo 'root:ansible123' | chpasswd
 echo 'ovsuser:ansible123' | chpasswd
 
-# Configure SSH logging
+# Configure SSH logging (only if not already configured)
 echo "Configuring SSH logging..."
-echo "SyslogFacility LOCAL0" >> /etc/ssh/sshd_config
-echo "LogLevel INFO" >> /etc/ssh/sshd_config
+if ! grep -q "^SyslogFacility LOCAL0" /etc/ssh/sshd_config; then
+    echo "SyslogFacility LOCAL0" >> /etc/ssh/sshd_config
+fi
+if ! grep -q "^LogLevel INFO" /etc/ssh/sshd_config; then
+    echo "LogLevel INFO" >> /etc/ssh/sshd_config
+fi
 
 # Start SSH with logging
 echo "Starting SSH..."
