@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+aiosqlite
+asyncpg
+langchain
+langchain-openai
+langgraph
+python-dotenv
+pydantic
+paramiko
+ansible
+sse-starlette
+websockets
+aiohttp
