@@ -12,8 +12,8 @@ A self-healing network system that uses AI and Ansible to detect, roll back, and
 
 ## Todo
 
-- [ ] Network data structure visualization in the UI
-- [ ] Device configuration retrieval via Ansible playbooks
+- [x] Network data structure visualization in the UI
+- [x] Device configuration retrieval via Ansible playbooks
 - [ ] Version control system for device configurations
   - [ ] Tagging mechanism for stable configurations
   - [ ] Configuration history tracking
