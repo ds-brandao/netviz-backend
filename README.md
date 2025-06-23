@@ -73,3 +73,18 @@ graph LR
 - Version control of configs
 - Event-driven network management with AI
 - End-to-end network testing and validation
+
+## To Do
+
+- [x] Network data structure visualization in the UI
+- [x] Device configuration retrieval via Ansible playbooks
+- [ ] Version control system for device configurations
+  - [ ] Tagging mechanism for stable configurations
+  - [ ] Configuration history tracking
+- [ ] Automated rollback functionality for failed changes
+  - [ ] Create network tests & validations that trigger a failure & rollback
+- [ ] Design Chat + Version Control Config interfaces
+- [ ] Change from LLama to more stable or better-performing model
+- [ ] Full Self-Driving
+  - [ ] Create Network Monitoring Strategy that relevantly triggers events
+  - [ ] Root Cause Analysis from event >> Rollback or Make Changes
