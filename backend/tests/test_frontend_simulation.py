@@ -6,7 +6,9 @@ Test script that simulates frontend behavior to test streaming chat with tool ca
 import asyncio
 import aiohttp
 import json
+import pytest
 
+@pytest.mark.asyncio
 async def test_frontend_streaming():
     """Simulate frontend streaming chat request"""
     

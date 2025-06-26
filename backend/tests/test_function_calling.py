@@ -4,12 +4,20 @@ Test script to verify Llama API function calling is working properly.
 """
 
 import os
+import sys
 import asyncio
+import pytest
+from pathlib import Path
 from dotenv import load_dotenv
-from agent import agent_streaming_chat
+
+# Add the parent directory to the Python path so we can import from src
+sys.path.insert(0, str(Path(__file__).parent.parent))
+
+from src.agent.agent import agent_streaming_chat
 
 load_dotenv()
 
+@pytest.mark.asyncio
 async def test_function_calling():
     """Test function calling with a simple network status request"""
     
@@ -45,6 +53,7 @@ async def test_function_calling():
         import traceback
         traceback.print_exc()
 
+@pytest.mark.asyncio
 async def test_simple_chat():
     """Test simple chat without function calling"""
     

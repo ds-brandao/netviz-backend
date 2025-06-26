@@ -1,0 +1,1 @@
+# Agent module for AI assistant functionality
