@@ -257,10 +257,17 @@ class MetricsSyncService:
                 
                 for node in result.scalars().all():
                     # Mark for deletion if it's test data or invalid
+                    node_name_lower = node.name.lower() if node.name else ""
+                    
+                    # Check for test device patterns
+                    test_prefixes = ["retrieved ", "concurrent ", "test ", "bulk ", "status test", "metadata test"]
+                    is_test_device = any(node_name_lower.startswith(prefix) for prefix in test_prefixes)
+                    
                     if (node.name in ["string", "Device test-device-001"] or 
                         node.type == "string" or 
                         node.ip_address == "string" or
-                        "test-device" in node.name):
+                        "test-device" in node.name or
+                        is_test_device):
                         nodes_to_delete.append(node.id)
                 
                 if nodes_to_delete:

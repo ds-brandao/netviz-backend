@@ -1,0 +1,18 @@
+# Frontend Requirements
+# This is a Node.js/npm project - no Python dependencies needed for the frontend
+# 
+# To install frontend dependencies, run:
+# npm install
+#
+# The frontend uses the following key technologies:
+# - React 19.1.0
+# - Vite 5.4.2
+# - TypeScript 5.5.3
+# - TailwindCSS 3.4.1
+# - ReactFlow 11.11.0
+# - Assistant UI React 0.10.24
+#
+# To start the frontend development server:
+# ./start.sh
+# or
+# npm run dev
