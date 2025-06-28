@@ -28,8 +28,8 @@ class Settings:
     )
     
     # OpenSearch configuration
-    OPENSEARCH_BASE_URL = os.getenv("OPENSEARCH_BASE_URL", "https://192.168.0.132:9200")
-    OPENSEARCH_USERNAME = os.getenv("OPENSEARCH_USERNAME", "admin")
+    OPENSEARCH_BASE_URL = os.getenv("OPENSEARCH_URL", "https://localhost:9200")
+    OPENSEARCH_USERNAME = os.getenv("OPENSEARCH_USER", "admin")
     OPENSEARCH_PASSWORD = os.getenv("OPENSEARCH_PASSWORD")
     if not OPENSEARCH_PASSWORD:
         raise ValueError("Environment variable 'OPENSEARCH_PASSWORD' must be set and cannot be empty.")

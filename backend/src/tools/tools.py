@@ -849,16 +849,16 @@ async def execute_network_playbook(
         
         # Add debug information
         print(f"=== ANSIBLE EXECUTION DEBUG ===")
-        print(f"Connecting to Ansible server: jack@192.168.0.131")
+        print(f"Connecting to Ansible server: {os.getenv('ANSIBLE_SSH_USERNAME')}@{os.getenv('ANSIBLE_SSH_HOST')}")
         print(f"Target device: {target_device} -> {target_hosts}")
         print(f"Playbook type: {playbook_type}")
         print(f"Command length: {len(full_command)} characters")
         
         # Execute on Ansible server via SSH
         ssh_result = await execute_ssh_command(
-            host=os.getenv("ANSIBLE_SSH_HOST", "default_host"),
-            username=os.getenv("ANSIBLE_SSH_USERNAME", "default_user"), 
-            password=os.getenv("ANSIBLE_SSH_PASSWORD", "default_password"),
+            host=os.getenv("ANSIBLE_SSH_HOST"),
+            username=os.getenv("ANSIBLE_SSH_USERNAME"), 
+            password=os.getenv("ANSIBLE_SSH_PASSWORD"),
             command=full_command
         )
         

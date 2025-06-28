@@ -1,15 +1,19 @@
 import asyncio
+import os
 import requests
 from requests.packages.urllib3.exceptions import InsecureRequestWarning
+from dotenv import load_dotenv
+
+load_dotenv()
 requests.packages.urllib3.disable_warnings(InsecureRequestWarning)
 
 session = requests.Session()
 session.verify = False
-session.auth = ('admin', 'xuwzuc-rExzo3-hotjed')
+session.auth = (os.getenv('OPENSEARCH_USER', 'admin'), os.getenv('OPENSEARCH_PASSWORD'))
 
 try:
     # Check what indexes exist
-    response = session.get('https://192.168.0.132:9200/_cat/indices?v&s=index')
+    response = session.get(f'{os.getenv("OPENSEARCH_URL")}/_cat/indices?v&s=index')
     print('Available indexes:')
     print(response.text)
     
@@ -39,7 +43,7 @@ try:
         }
     }
     
-    response = session.post('https://192.168.0.132:9200/*-logs/_search', json=agg_query)
+    response = session.post(f'{os.getenv("OPENSEARCH_URL")}/*-logs/_search', json=agg_query)
     print('\nAggregation response status:', response.status_code)
     if response.status_code == 200:
         data = response.json()
@@ -74,7 +78,7 @@ try:
         }
     }
     
-    response = session.post('https://192.168.0.132:9200/*-logs/_search', json=query)
+    response = session.post(f'{os.getenv("OPENSEARCH_URL")}/*-logs/_search', json=query)
     if response.status_code == 200:
         data = response.json()
         print('Total hits:', data.get('hits', {}).get('total', {}).get('value', 0))
