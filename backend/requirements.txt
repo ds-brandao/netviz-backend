@@ -16,3 +16,6 @@ websockets
 aiohttp
 requests
 llama-api-client
+pytest
+pytest-asyncio
+greenlet

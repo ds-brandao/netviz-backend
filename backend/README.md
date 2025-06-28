@@ -41,11 +41,15 @@ you tell me) but I need the configuration to be extremely simple and done automa
 
 ## Features
 
-- **FastAPI Backend**: Simple and efficient REST API
+- **FastAPI Backend**: Simple and efficient REST API with structured routing
 - **LangGraph Agent**: AI-powered chat interface for network operations
 - **PostgreSQL Database**: Stores chat history and network infrastructure data
-- **Ansible Playbook Generation**: Create playbooks from natural language
-- **Network Status Monitoring**: Track and update network node status
+- **Ansible Playbook Generation**: Create and execute playbooks from natural language
+- **Network Graph Management**: Real-time network topology visualization and updates
+- **OpenSearch Integration**: Advanced log querying and analysis
+- **WebSocket Support**: Real-time updates and streaming responses
+- **Metrics Synchronization**: Automated data synchronization across services
+- **Modular Architecture**: Clean separation of concerns with services, models, and controllers
 
 ## Setup
 
@@ -107,14 +111,25 @@ uvicorn app:app --reload --host 0.0.0.0 --port 3001
 ### Health Check
 - `GET /health` - Check if the service is running
 
-### Chat
-- `POST /chat` - Send a message to the AI agent
-- `GET /chats/{session_id}` - Get chat history for a session
+### Chat & Agent
+- `POST /agent/chat` - Send a message to the AI agent
+- `GET /agent/chats/{session_id}` - Get chat history for a session
+- `POST /agent/stream` - Stream chat responses
 
 ### Network Infrastructure
+- `GET /network/graph` - Get complete network topology
+- `POST /network/graph` - Update network graph
 - `GET /network/nodes` - Get all network nodes
 - `POST /network/nodes` - Create a new network node
 - `PUT /network/nodes/{node_id}` - Update a network node
+
+### Logs & Metrics
+- `GET /logs/search` - Search through network logs
+- `GET /logs/recent` - Get recent log entries
+- `GET /metrics/sync` - Synchronize metrics data
+
+### WebSocket
+- `/ws/{session_id}` - WebSocket connection for real-time updates
 
 ## Architecture
 
@@ -131,14 +146,54 @@ The API documentation is available at http://localhost:3001/docs when the server
 
 ## Project Structure
 
-- `app.py` - Main FastAPI application
-- `agent.py` - LangGraph agent configuration
-- `database.py` - Database models and connection
-- `tools.py` - Agent tools for network operations
-- `requirements.txt` - Python dependencies
-- `docker-compose.yml` - PostgreSQL setup
-- `.env.example` - Environment variables template
-
-
-
-I hope nobody ever uses this code blindly. It's pretty awful. But we're on the right track.
+```
+backend/
+├── app.py                          # Main FastAPI application entry point
+├── websocket_manager.py            # WebSocket connection management
+├── requirements.txt                # Python dependencies
+├── docker-compose.yml              # PostgreSQL setup
+├── run.sh                          # Setup and run script
+├── pytest.ini                      # Test configuration
+├── database/                       # Database layer
+│   ├── database.py                 # Database models and connection
+│   ├── migrate_database.py         # Database migration utilities
+│   └── reset_database.py           # Database reset utilities
+├── src/                            # Main source code
+│   ├── agent/
+│   │   └── agent.py                # LangGraph agent configuration
+│   ├── api/
+│   │   └── routers/                # API route handlers
+│   │       ├── agent.py            # Agent chat endpoints
+│   │       ├── network.py          # Network infrastructure endpoints
+│   │       ├── logs.py             # Log querying endpoints
+│   │       ├── metrics.py          # Metrics endpoints
+│   │       ├── test.py             # Test endpoints
+│   │       └── websocket.py        # WebSocket endpoints
+│   ├── config/
+│   │   └── settings.py             # Application configuration
+│   ├── models/
+│   │   └── api_models.py           # Pydantic models for API
+│   ├── services/                   # Business logic services
+│   │   ├── graph_service.py        # Network graph management
+│   │   ├── opensearch_service.py   # OpenSearch integration
+│   │   ├── query_logs.py           # Log querying service
+│   │   └── metrics_sync_service.py # Metrics synchronization
+│   └── tools/
+│       └── tools.py                # Agent tools for network operations
+├── tests/                          # Test suite
+│   ├── conftest.py                 # Test configuration
+│   ├── test_api_integration.py     # API integration tests
+│   └── test_function_calling_pytest.py # Function calling tests
+├── documentation/                  # Technical documentation
+│   ├── AI_AGENT_IMPLEMENTATION.md
+│   ├── FUNCTION_CALLING_SETUP.md
+│   └── OPENSEARCH_SETUP.md
+├── playbooks/                      # Ansible playbooks and templates
+│   ├── retrieve-configs/           # Configuration retrieval playbooks
+│   ├── rollback-configs/           # Configuration rollback playbooks
+│   ├── AI_AGENT_INSTRUCTIONS.md
+│   └── EXAMPLES.md
+└── archieve/                       # Legacy/archived code
+    ├── enhanced_agent.py
+    └── tools.py
+```

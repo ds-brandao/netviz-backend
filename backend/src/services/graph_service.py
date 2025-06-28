@@ -4,7 +4,7 @@ from sqlalchemy import select, delete
 from sqlalchemy.orm import selectinload
 import json
 
-from database import get_db_session, NetworkNode, NetworkEdge, GraphUpdate
+from database.database import get_db_session, NetworkNode, NetworkEdge, GraphUpdate
 from websocket_manager import connection_manager
 
 class GraphService:

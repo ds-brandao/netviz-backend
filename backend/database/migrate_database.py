@@ -7,7 +7,7 @@ This preserves existing data.
 import asyncio
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
-from database import DATABASE_URL
+from database.database import DATABASE_URL
 
 async def migrate_database():
     """Add missing columns to existing tables"""

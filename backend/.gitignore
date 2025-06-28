@@ -56,3 +56,5 @@ htmlcov/
 
 # Docker volumes
 postgres_data/ 
+
+CLAUDE.md

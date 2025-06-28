@@ -8,7 +8,7 @@ import asyncio
 import os
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy import text
-from database import Base, DATABASE_URL
+from database.database import Base, DATABASE_URL
 
 async def reset_database():
     """Drop all tables and recreate them"""

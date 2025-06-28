@@ -1,3 +1,5 @@
+![CodeRabbit Pull Request Reviews](https://img.shields.io/coderabbit/prs/github/ds-brandao/netwiz?utm_source=oss&utm_medium=github&utm_campaign=ds-brandao%2Fnetwiz&labelColor=171717&color=FF570A&link=https%3A%2F%2Fcoderabbit.ai&label=CodeRabbit+Reviews)
+
 # netwiz
 
 <img src="documentation/wizard-logo.png" alt="Netwiz Logo" width="64" height="64" align="left" style="margin-right: 16px;">
