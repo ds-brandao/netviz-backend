@@ -200,25 +200,40 @@ async def ai_query_metrics(
                 "term": {"container.name.keyword": container_name}
             })
         
-        logs = await opensearch_service.query_logs("system-metrics-*", opensearch_query, 0)
-        data = {"aggregations": {"by_host": {"buckets": []}}}  # Mock structure for now
+        metrics_data = await opensearch_service.fetch_metrics()
         
-        metrics = {}
-        if "aggregations" in data and "by_host" in data["aggregations"]:
-            for bucket in data["aggregations"]["by_host"]["buckets"]:
-                host_name = bucket["key"]
+        # Filter metrics based on query parameters
+        filtered_metrics = {}
+        for host_name, host_data in metrics_data.items():
+            if device_name and device_name.lower() not in host_name.lower():
+                continue
                 
-                if bucket["latest_metrics"]["hits"]["hits"]:
-                    hit = bucket["latest_metrics"]["hits"]["hits"][0]["_source"]
-                    
-                    metrics[host_name] = {
-                        "timestamp": hit.get("@timestamp"),
-                        "host": hit.get("host", {}),
-                        "system": hit.get("system", {}),
-                        "docker": hit.get("docker", {}),
-                        "container": hit.get("container", {}),
-                        "metric_type": hit.get("metric_type")
+            # Apply metric_type filter if specified
+            if metric_type:
+                # Filter system metrics by type
+                if metric_type in ["cpu", "memory", "disk", "load", "uptime"] and "system" in host_data:
+                    filtered_host_data = {
+                        "timestamp": host_data.get("timestamp"),
+                        "host": host_data.get("host", {}),
+                        "system": {metric_type: host_data["system"].get(metric_type)},
+                        "metric_type": metric_type
                     }
+                # Filter container metrics
+                elif metric_type == "docker" and "containers" in host_data:
+                    filtered_host_data = {
+                        "timestamp": host_data.get("timestamp"),
+                        "host": host_data.get("host", {}),
+                        "containers": host_data.get("containers", []),
+                        "metric_type": metric_type
+                    }
+                else:
+                    continue
+                filtered_metrics[host_name] = filtered_host_data
+            else:
+                # No metric_type filter, include all data
+                filtered_metrics[host_name] = host_data
+        
+        metrics = filtered_metrics
         
         return {
             "metrics": metrics,
@@ -342,13 +357,13 @@ async def stream_chat(request: StreamingChatRequest):
                         content = chunk.get("content") or chunk.get("text", "")
                         full_response += content
                         # Normalize to 'text' type for frontend compatibility
-                        yield f"data: {json.dumps({'type': 'text', 'content': content})}\\n\\n"
+                        yield f"data: {json.dumps({'type': 'text', 'content': content})}\n\n"
                     elif chunk["type"] == "tool_result":
-                        yield f"data: {json.dumps(chunk)}\\n\\n"
+                        yield f"data: {json.dumps(chunk)}\n\n"
                     elif chunk["type"] == "done":
                         break
                     else:
-                        yield f"data: {json.dumps(chunk)}\\n\\n"
+                        yield f"data: {json.dumps(chunk)}\n\n"
                         
             except Exception as agent_error:
                 print(f"Agent failed: {agent_error}, falling back to rich content demos")
@@ -364,7 +379,7 @@ async def stream_chat(request: StreamingChatRequest):
                     if i + chunk_size < len(words):
                         chunk += " "
                     full_response += chunk
-                    yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\\n\\n"
+                    yield f"data: {json.dumps({'type': 'text', 'content': chunk})}\n\n"
                     await asyncio.sleep(0.1)
             
             # Save to database
@@ -379,13 +394,13 @@ async def stream_chat(request: StreamingChatRequest):
                 await session.commit()
             
             # Send completion
-            yield f"data: {json.dumps({'type': 'done'})}\\n\\n"
+            yield f"data: {json.dumps({'type': 'done'})}\n\n"
                 
         except Exception as e:
             print(f"Error in stream_chat: {str(e)}")
             import traceback
             traceback.print_exc()
-            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\\n\\n"
+            yield f"data: {json.dumps({'type': 'error', 'error': str(e)})}\n\n"
     
     return StreamingResponse(
         generate_events(),
